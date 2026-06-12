@@ -31,9 +31,9 @@ interface ProjectDetail {
 }
 
 const statusColors: Record<string, string> = {
-  draft: 'bg-ink-700 text-ink-300',
-  in_progress: 'bg-gold-800/50 text-gold-300',
-  complete: 'bg-green-900/50 text-green-400',
+  draft: 'status-draft',
+  in_progress: 'status-in_progress',
+  complete: 'status-complete',
 }
 
 function SortableChapter({ chapter, projectId }: { chapter: Chapter; projectId: string }) {
@@ -42,20 +42,20 @@ function SortableChapter({ chapter, projectId }: { chapter: Chapter; projectId: 
 
   return (
     <div ref={setNodeRef} style={style} className="card p-4 flex items-center gap-3">
-      <button {...attributes} {...listeners} className="text-ink-500 hover:text-gold-400 cursor-grab active:cursor-grabbing">
+      <button {...attributes} {...listeners} className="text-ink0 hover:text-seal cursor-grab active:cursor-grabbing">
         <GripVertical size={18} />
       </button>
       <Link to={`/projects/${projectId}/chapters/${chapter.id}`} className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-ink-500 font-mono">Ch. {chapter.chapter_number}</span>
-          <h3 className="font-medium text-ink-100 truncate">{chapter.title}</h3>
+          <span className="text-xs text-ink0 font-mono">Ch. {chapter.chapter_number}</span>
+          <h3 className="font-medium text-ink truncate">{chapter.title}</h3>
         </div>
-        <div className="flex items-center gap-3 mt-1 text-xs text-ink-400">
+        <div className="flex items-center gap-3 mt-1 text-xs text-study-300">
           <span>{chapter.word_count || 0} words</span>
           {chapter.voice_match_score && <span>Voice match: {Math.round(chapter.voice_match_score * 100)}%</span>}
         </div>
       </Link>
-      <span className={`text-xs px-2.5 py-1 rounded-full capitalize ${statusColors[chapter.status] || statusColors.draft}`}>
+      <span className={`status-tag ${statusColors[chapter.status] || statusColors.draft}`}>
         {chapter.status.replace('_', ' ')}
       </span>
     </div>
@@ -138,51 +138,51 @@ export default function ManuscriptStudio() {
     }
   }
 
-  if (loading) return <div className="p-8 text-ink-400">Loading manuscript...</div>
-  if (!project) return <div className="p-8 text-ink-400">Manuscript not found.</div>
+  if (loading) return <div className="p-8 text-study-300">Loading manuscript...</div>
+  if (!project) return <div className="p-8 text-study-300">Manuscript not found.</div>
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
-      <Link to="/projects" className="text-sm text-ink-400 hover:text-gold-400 flex items-center gap-1 mb-4">
+      <Link to="/projects" className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-4">
         <ArrowLeft size={14} /> All manuscripts
       </Link>
 
       <div className="flex items-start justify-between mb-2">
         <div>
           <h1 className="font-display text-display-md font-semibold">{project.title}</h1>
-          <span className="text-sm text-gold-400 capitalize">{project.genre}</span>
+          <span className="text-sm text-seal capitalize">{project.genre}</span>
         </div>
         <div className="flex gap-2">
-          <button onClick={handleExport} disabled={exporting} className="btn-ghost flex items-center gap-2 text-sm">
+          <button onClick={handleExport} disabled={exporting} className="btn-secondary flex items-center gap-2 text-sm">
             <Download size={16} /> {exporting ? 'Exporting...' : 'Export .docx'}
           </button>
-          <button onClick={() => setShowForm(!showForm)} className="btn-gold flex items-center gap-2 text-sm">
+          <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2 text-sm">
             {showForm ? <X size={16} /> : <Plus size={16} />}
             {showForm ? 'Cancel' : 'Add Chapter'}
           </button>
         </div>
       </div>
 
-      {project.theme && <p className="text-ink-400 mb-6">{project.theme}</p>}
+      {project.theme && <p className="text-study-300 mb-6">{project.theme}</p>}
 
       {showForm && (
         <form onSubmit={handleAddChapter} className="card p-6 mb-6 space-y-4 animate-fade-in-up">
           <div>
-            <label className="block text-sm text-ink-300 mb-1.5">Chapter Title</label>
+            <label className="block text-sm text-study-400 mb-1.5">Chapter Title</label>
             <input required value={chTitle} onChange={(e) => setChTitle(e.target.value)} className="input-field w-full" placeholder="The Wilderness Season" />
           </div>
           <div>
-            <label className="block text-sm text-ink-300 mb-1.5">Intent</label>
+            <label className="block text-sm text-study-400 mb-1.5">Intent</label>
             <textarea value={chIntent} onChange={(e) => setChIntent(e.target.value)} className="input-field w-full h-24 resize-none" placeholder="What should this chapter accomplish for the reader?" />
           </div>
-          <button type="submit" className="btn-gold">Add Chapter</button>
+          <button type="submit" className="btn-primary">Add Chapter</button>
         </form>
       )}
 
       {project.chapters.length === 0 ? (
         <div className="text-center py-16">
-          <FileText size={32} className="mx-auto text-ink-500 mb-3" />
-          <p className="text-ink-400 mb-4">No chapters yet. Add your first chapter to begin.</p>
+          <FileText size={32} className="mx-auto text-ink0 mb-3" />
+          <p className="text-study-300 mb-4">No chapters yet. Add your first chapter to begin.</p>
         </div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

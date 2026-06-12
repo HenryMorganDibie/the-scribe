@@ -26,17 +26,17 @@ export default function Signup() {
   }
 
   return (
-    <div className="min-h-screen bg-ink-950 flex items-center justify-center px-6">
+    <div className="min-h-screen bg-paper flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
-        <div className="flex justify-center mb-8">
-          <Link to="/"><QuillLogo size="lg" animate={false} /></Link>
+        <div className="mb-8">
+          <Link to="/"><QuillLogo size="lg" /></Link>
         </div>
         <div className="card p-8">
-          <h1 className="font-display text-display-xs font-semibold mb-2 text-center">Begin your voice interview</h1>
-          <p className="text-sm text-ink-400 text-center mb-6">It takes about 10 minutes — and The Scribe never forgets.</p>
+          <h1 className="font-display text-display-xs font-semibold mb-1">Begin your voice interview</h1>
+          <p className="text-sm text-study-300 mb-6">About 10 minutes. The Scribe never forgets an answer.</p>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm text-ink-300 mb-1.5">Full name</label>
+              <label className="block text-sm text-study-400 mb-1.5">Full name</label>
               <input
                 type="text"
                 required
@@ -47,7 +47,7 @@ export default function Signup() {
               />
             </div>
             <div>
-              <label className="block text-sm text-ink-300 mb-1.5">Email</label>
+              <label className="block text-sm text-study-400 mb-1.5">Email</label>
               <input
                 type="email"
                 required
@@ -58,7 +58,7 @@ export default function Signup() {
               />
             </div>
             <div>
-              <label className="block text-sm text-ink-300 mb-1.5">Password</label>
+              <label className="block text-sm text-study-400 mb-1.5">Password</label>
               <input
                 type="password"
                 required
@@ -69,13 +69,13 @@ export default function Signup() {
                 placeholder="At least 8 characters"
               />
             </div>
-            <button type="submit" disabled={loading} className="btn-gold w-full mt-2 disabled:opacity-50">
-              {loading ? 'Creating account...' : 'Create account'}
+            <button type="submit" disabled={loading} className="btn-primary w-full mt-2">
+              {loading ? 'Creating account…' : 'Create account'}
             </button>
           </form>
-          <p className="text-center text-sm text-ink-400 mt-6">
+          <p className="text-sm text-study-300 mt-6">
             Already have an account?{' '}
-            <Link to="/login" className="text-gold-400 hover:underline">Log in</Link>
+            <Link to="/login" className="text-seal hover:underline">Log in</Link>
           </p>
         </div>
       </div>

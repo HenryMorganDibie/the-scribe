@@ -1,13 +1,12 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Feather, BookOpen, ScrollText, LogOut, User } from 'lucide-react'
 import QuillLogo from '@/components/ui/QuillLogo'
 import { useAuthStore } from '@/stores/authStore'
 
 const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/projects', label: 'Manuscripts', icon: BookOpen },
-  { to: '/voice-profile', label: 'Voice DNA', icon: Feather },
-  { to: '/testimonies', label: 'Testimony Vault', icon: ScrollText },
+  { to: '/dashboard', label: 'Desk' },
+  { to: '/projects', label: 'Manuscripts' },
+  { to: '/voice-profile', label: 'Voice' },
+  { to: '/testimonies', label: 'Testimonies' },
 ]
 
 export default function AppLayout() {
@@ -20,49 +19,46 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-ink-950 flex">
-      {/* Sidebar */}
-      <aside className="w-64 border-r border-ink-700 flex flex-col bg-ink-900/60 backdrop-blur-sm">
-        <div className="p-6 border-b border-ink-700">
-          <QuillLogo size="sm" animate={false} />
+    <div className="min-h-screen bg-paper flex">
+      {/* Sidebar — study chrome, warm charcoal */}
+      <aside className="w-56 bg-study-700 text-study-50 flex flex-col flex-shrink-0">
+        <div className="px-6 py-5 border-b border-study-600">
+          <span className="text-study-50">
+            <QuillLogo size="sm" />
+          </span>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
-          {navItems.map(({ to, label, icon: Icon }) => (
+        <nav className="flex-1 px-3 py-4 space-y-0.5">
+          {navItems.map(({ to, label }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                `block px-3 py-2 rounded text-sm transition-colors ${
                   isActive
-                    ? 'bg-gold-800/60 text-gold-400 shadow-gold-sm'
-                    : 'text-ink-300 hover:text-ink-50 hover:bg-ink-800'
+                    ? 'bg-study-600 text-paper-100'
+                    : 'text-study-200 hover:text-paper-100 hover:bg-study-600/60'
                 }`
               }
             >
-              <Icon size={18} />
               {label}
             </NavLink>
           ))}
         </nav>
 
-        <div className="p-4 border-t border-ink-700">
-          <div className="flex items-center gap-3 px-3 py-2 rounded-lg">
-            <div className="w-8 h-8 rounded-full bg-gold-gradient flex items-center justify-center">
-              <User size={16} className="text-ink-950" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-ink-50 truncate">{user?.full_name}</p>
-              <p className="text-xs text-ink-400 truncate">{user?.email}</p>
-            </div>
-            <button onClick={handleLogout} className="text-ink-400 hover:text-gold-400 transition-colors" title="Log out">
-              <LogOut size={16} />
-            </button>
-          </div>
+        <div className="px-3 py-4 border-t border-study-600 text-sm">
+          <p className="text-paper-100 truncate px-3">{user?.full_name}</p>
+          <p className="text-study-300 truncate px-3 text-xs mb-2">{user?.email}</p>
+          <button
+            onClick={handleLogout}
+            className="w-full text-left px-3 py-1.5 rounded text-study-300 hover:text-paper-100 hover:bg-study-600/60 transition-colors text-sm"
+          >
+            Log out
+          </button>
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* Main content — manuscript page */}
       <main className="flex-1 overflow-y-auto">
         <Outlet />
       </main>

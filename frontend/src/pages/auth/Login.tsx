@@ -25,16 +25,16 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-ink-950 flex items-center justify-center px-6">
+    <div className="min-h-screen bg-paper flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
-        <div className="flex justify-center mb-8">
-          <Link to="/"><QuillLogo size="lg" animate={false} /></Link>
+        <div className="mb-8">
+          <Link to="/"><QuillLogo size="lg" /></Link>
         </div>
         <div className="card p-8">
-          <h1 className="font-display text-display-xs font-semibold mb-6 text-center">Welcome back</h1>
+          <h1 className="font-display text-display-xs font-semibold mb-6">Log in</h1>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm text-ink-300 mb-1.5">Email</label>
+              <label className="block text-sm text-study-400 mb-1.5">Email</label>
               <input
                 type="email"
                 required
@@ -45,7 +45,7 @@ export default function Login() {
               />
             </div>
             <div>
-              <label className="block text-sm text-ink-300 mb-1.5">Password</label>
+              <label className="block text-sm text-study-400 mb-1.5">Password</label>
               <input
                 type="password"
                 required
@@ -55,13 +55,13 @@ export default function Login() {
                 placeholder="••••••••"
               />
             </div>
-            <button type="submit" disabled={loading} className="btn-gold w-full mt-2 disabled:opacity-50">
-              {loading ? 'Signing in...' : 'Sign in'}
+            <button type="submit" disabled={loading} className="btn-primary w-full mt-2">
+              {loading ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
-          <p className="text-center text-sm text-ink-400 mt-6">
+          <p className="text-sm text-study-300 mt-6">
             New here?{' '}
-            <Link to="/signup" className="text-gold-400 hover:underline">Create an account</Link>
+            <Link to="/signup" className="text-seal hover:underline">Create an account</Link>
           </p>
         </div>
       </div>

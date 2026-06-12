@@ -20,8 +20,8 @@ function ProtectedRoute({ children, requireOnboarded = true }: { children: JSX.E
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-ink-950">
-        <div className="animate-pulse-gold text-gold-400 font-display text-2xl">The Scribe</div>
+      <div className="min-h-screen flex items-center justify-center bg-paper">
+        <div className="animate-pulse text-seal font-display text-2xl">The Scribe</div>
       </div>
     )
   }
