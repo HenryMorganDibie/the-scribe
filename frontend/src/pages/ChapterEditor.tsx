@@ -61,7 +61,7 @@ export default function ChapterEditor() {
     content: '',
     editorProps: {
       attributes: {
-        class: 'prose prose-invert prose-lg max-w-none focus:outline-none font-display leading-relaxed min-h-[60vh]',
+        class: 'manuscript-canvas max-w-none focus:outline-none min-h-[60vh]',
       },
     },
     onUpdate: ({ editor }) => {
@@ -310,7 +310,7 @@ export default function ChapterEditor() {
     }
   }
 
-  if (loading || !chapter) return <div className="p-8 text-ink-400">Loading chapter...</div>
+  if (loading || !chapter) return <div className="p-8 text-study-300">Loading chapter...</div>
 
   const wordCount = editor?.storage.characterCount.words() || 0
 
@@ -319,21 +319,21 @@ export default function ChapterEditor() {
       {/* Editor */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-8 py-8">
-          <Link to={`/projects/${projectId}`} className="text-sm text-ink-400 hover:text-gold-400 flex items-center gap-1 mb-4">
+          <Link to={`/projects/${projectId}`} className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-4">
             <ArrowLeft size={14} /> Back to manuscript
           </Link>
 
           <div className="flex items-start justify-between mb-6">
             <div>
-              <span className="text-xs text-ink-500 font-mono">Chapter {chapter.chapter_number}</span>
+              <span className="text-xs text-ink0 font-mono">Chapter {chapter.chapter_number}</span>
               <h1 className="font-display text-display-md font-semibold">{chapter.title}</h1>
-              {chapter.intent && <p className="text-ink-400 mt-1 text-sm">{chapter.intent}</p>}
+              {chapter.intent && <p className="text-study-300 mt-1 text-sm">{chapter.intent}</p>}
             </div>
             <div className="flex gap-2 flex-shrink-0">
-              <button onClick={handleExportChapter} className="btn-ghost text-sm flex items-center gap-1.5">
+              <button onClick={handleExportChapter} className="btn-secondary text-sm flex items-center gap-1.5">
                 <Download size={14} /> Export
               </button>
-              <button onClick={manualSave} disabled={saving} className="btn-ghost text-sm flex items-center gap-1.5">
+              <button onClick={manualSave} disabled={saving} className="btn-secondary text-sm flex items-center gap-1.5">
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 {saving ? 'Saving' : 'Save'}
               </button>
@@ -341,26 +341,26 @@ export default function ChapterEditor() {
           </div>
 
           {(!chapter.content || chapter.content.length < 20) && !generating && (
-            <button onClick={handleGenerateChapter} className="btn-gold w-full flex items-center justify-center gap-2 mb-6 py-3">
+            <button onClick={handleGenerateChapter} className="btn-primary w-full flex items-center justify-center gap-2 mb-6 py-3">
               <Sparkles size={18} /> Generate Chapter Draft in My Voice
             </button>
           )}
 
           {generating && (
-            <div className="flex items-center gap-2 text-gold-400 text-sm mb-4 animate-pulse-gold">
+            <div className="flex items-center gap-2 text-seal text-sm mb-4 animate-pulse">
               <Sparkles size={16} /> The Scribe is writing in your voice...
             </div>
           )}
 
-          <div className="border-t border-ink-700 pt-6">
+          <div className="border-t border-paper-300 pt-6">
             <EditorContent editor={editor} />
           </div>
 
-          <div className="mt-6 text-xs text-ink-500 flex items-center gap-4">
+          <div className="mt-6 text-xs text-ink0 flex items-center gap-4">
             <span>{wordCount} words</span>
             {voiceCheck && (
               <span className="flex items-center gap-1">
-                <CheckCircle2 size={12} className="text-gold-400" />
+                <CheckCircle2 size={12} className="text-seal" />
                 Voice match: {Math.round(voiceCheck.score * 100)}% ({voiceCheck.grade})
               </span>
             )}
@@ -369,23 +369,23 @@ export default function ChapterEditor() {
       </div>
 
       {/* Scribe AI Sidebar */}
-      <div className="w-96 border-l border-ink-700 bg-ink-900/60 flex flex-col">
-        <div className="p-4 border-b border-ink-700 flex items-center gap-2">
-          <Sparkles size={18} className="text-gold-400" />
+      <div className="w-96 border-l border-paper-300 bg-paper-200 flex flex-col">
+        <div className="p-4 border-b border-paper-300 flex items-center gap-2">
+          <Sparkles size={18} className="text-seal" />
           <h2 className="font-display text-display-xs font-semibold">The Scribe</h2>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-ink-700">
+        <div className="flex border-b border-paper-300">
           <button
             onClick={() => setTab('actions')}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === 'actions' ? 'text-gold-400 border-b-2 border-gold-400' : 'text-ink-400 hover:text-ink-200'}`}
+            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === 'actions' ? 'text-seal border-b-2 border-seal' : 'text-study-300 hover:text-study-400'}`}
           >
             Quick Actions
           </button>
           <button
             onClick={() => setTab('chat')}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === 'chat' ? 'text-gold-400 border-b-2 border-gold-400' : 'text-ink-400 hover:text-ink-200'}`}
+            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === 'chat' ? 'text-seal border-b-2 border-seal' : 'text-study-300 hover:text-study-400'}`}
           >
             Chat
           </button>
@@ -397,52 +397,52 @@ export default function ChapterEditor() {
             <button
               onClick={handleContinue}
               disabled={!!actionLoading || generating}
-              className="w-full card p-3 text-left hover:border-gold-400/50 flex items-start gap-3 disabled:opacity-50"
+              className="w-full card p-3 text-left hover:border-seal/50 flex items-start gap-3 disabled:opacity-50"
             >
-              <Wand2 size={18} className="text-gold-400 flex-shrink-0 mt-0.5" />
+              <Wand2 size={18} className="text-seal flex-shrink-0 mt-0.5" />
               <div>
                 <h3 className="font-medium text-sm">Continue Writing</h3>
-                <p className="text-xs text-ink-400">Pick up from where you left off, in your voice.</p>
+                <p className="text-xs text-study-300">Pick up from where you left off, in your voice.</p>
               </div>
-              {actionLoading === 'continue' && <Loader2 size={14} className="animate-spin text-gold-400 ml-auto" />}
+              {actionLoading === 'continue' && <Loader2 size={14} className="animate-spin text-seal ml-auto" />}
             </button>
 
             {/* Voice check */}
             <button
               onClick={handleVoiceCheck}
               disabled={!!actionLoading}
-              className="w-full card p-3 text-left hover:border-gold-400/50 flex items-start gap-3 disabled:opacity-50"
+              className="w-full card p-3 text-left hover:border-seal/50 flex items-start gap-3 disabled:opacity-50"
             >
-              <CheckCircle2 size={18} className="text-gold-400 flex-shrink-0 mt-0.5" />
+              <CheckCircle2 size={18} className="text-seal flex-shrink-0 mt-0.5" />
               <div>
                 <h3 className="font-medium text-sm">Check My Voice</h3>
-                <p className="text-xs text-ink-400">Score this chapter against your voice profile.</p>
+                <p className="text-xs text-study-300">Score this chapter against your voice profile.</p>
               </div>
-              {actionLoading === 'voice-check' && <Loader2 size={14} className="animate-spin text-gold-400 ml-auto" />}
+              {actionLoading === 'voice-check' && <Loader2 size={14} className="animate-spin text-seal ml-auto" />}
             </button>
 
             {voiceCheck?.feedback && (
-              <div className="bg-gold-800/20 border border-gold-700/40 rounded-lg p-3 text-sm">
+              <div className="bg-seal-50 border border-seal-100 rounded-lg p-3 text-sm">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="font-medium text-gold-300">Voice Match: {Math.round(voiceCheck.score * 100)}%</span>
-                  <span className="text-xs text-ink-400">{voiceCheck.grade}</span>
+                  <span className="font-medium text-seal-400">Voice Match: {Math.round(voiceCheck.score * 100)}%</span>
+                  <span className="text-xs text-study-300">{voiceCheck.grade}</span>
                 </div>
-                <p className="text-ink-300 text-xs">{voiceCheck.feedback}</p>
+                <p className="text-study-400 text-xs">{voiceCheck.feedback}</p>
               </div>
             )}
 
             {/* Weave story */}
             <div className="card p-3">
               <div className="flex items-start gap-3 mb-2">
-                <ScrollText size={18} className="text-gold-400 flex-shrink-0 mt-0.5" />
+                <ScrollText size={18} className="text-seal flex-shrink-0 mt-0.5" />
                 <div>
                   <h3 className="font-medium text-sm">Weave In My Story</h3>
-                  <p className="text-xs text-ink-400">Pull from your testimony vault.</p>
+                  <p className="text-xs text-study-300">Pull from your testimony vault.</p>
                 </div>
               </div>
               {testimonies.length === 0 ? (
-                <p className="text-xs text-ink-500 ml-8">
-                  No testimonies yet — <Link to="/testimonies" className="text-gold-400 underline">add one</Link>
+                <p className="text-xs text-ink0 ml-8">
+                  No testimonies yet — <Link to="/testimonies" className="text-seal underline">add one</Link>
                 </p>
               ) : (
                 <div className="ml-8 space-y-1.5">
@@ -451,28 +451,28 @@ export default function ChapterEditor() {
                       key={t.id}
                       onClick={() => handleWeaveStory(t.id)}
                       disabled={!!actionLoading}
-                      className="w-full text-left text-xs px-2.5 py-1.5 bg-ink-800 hover:bg-gold-800/30 hover:text-gold-300 rounded border border-ink-600 transition-colors disabled:opacity-50"
+                      className="w-full text-left text-xs px-2.5 py-1.5 bg-paper-200 hover:bg-seal-50 hover:text-seal-400 rounded border border-paper-300 transition-colors disabled:opacity-50"
                     >
                       {t.title}
                     </button>
                   ))}
                 </div>
               )}
-              {actionLoading === 'weave' && <Loader2 size={14} className="animate-spin text-gold-400 ml-8 mt-2" />}
+              {actionLoading === 'weave' && <Loader2 size={14} className="animate-spin text-seal ml-8 mt-2" />}
             </div>
 
             {/* Scripture suggestions */}
             <button
               onClick={handleScriptureSuggest}
               disabled={!!actionLoading}
-              className="w-full card p-3 text-left hover:border-gold-400/50 flex items-start gap-3 disabled:opacity-50"
+              className="w-full card p-3 text-left hover:border-seal/50 flex items-start gap-3 disabled:opacity-50"
             >
-              <BookOpen size={18} className="text-gold-400 flex-shrink-0 mt-0.5" />
+              <BookOpen size={18} className="text-seal flex-shrink-0 mt-0.5" />
               <div>
                 <h3 className="font-medium text-sm">Suggest Scripture Anchor</h3>
-                <p className="text-xs text-ink-400">Get verified scriptures fitting this passage.</p>
+                <p className="text-xs text-study-300">Get verified scriptures fitting this passage.</p>
               </div>
-              {actionLoading === 'scripture' && <Loader2 size={14} className="animate-spin text-gold-400 ml-auto" />}
+              {actionLoading === 'scripture' && <Loader2 size={14} className="animate-spin text-seal ml-auto" />}
             </button>
 
             {scriptureSuggestions.length > 0 && (
@@ -480,13 +480,13 @@ export default function ChapterEditor() {
                 {scriptureSuggestions.map((s, i) => (
                   <div key={i} className="scripture-block py-2 px-3">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="font-mono text-xs not-italic text-gold-300">{s.ref}</span>
-                      <button onClick={() => insertScripture(s)} className="text-xs text-gold-400 hover:underline not-italic">
+                      <span className="font-mono text-xs not-italic text-seal-400">{s.ref}</span>
+                      <button onClick={() => insertScripture(s)} className="text-xs text-seal hover:underline not-italic">
                         Insert
                       </button>
                     </div>
                     <p className="text-sm">{s.text}</p>
-                    {s.reason && <p className="text-xs text-ink-400 not-italic mt-1">{s.reason}</p>}
+                    {s.reason && <p className="text-xs text-study-300 not-italic mt-1">{s.reason}</p>}
                   </div>
                 ))}
               </div>
@@ -496,18 +496,18 @@ export default function ChapterEditor() {
           <>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {chatMessages.length === 0 && (
-                <p className="text-sm text-ink-500 italic">
+                <p className="text-sm text-ink0 italic">
                   Ask The Scribe anything — "Make this more prophetic", "What's missing from this chapter?",
                   "Suggest a stronger opening hook"...
                 </p>
               )}
               {chatMessages.map((m, i) => (
-                <div key={i} className={`text-sm rounded-lg p-3 ${m.role === 'user' ? 'bg-ink-800 ml-6' : 'bg-gold-800/20 border border-gold-700/30 mr-6'}`}>
-                  {m.content || (chatStreaming && i === chatMessages.length - 1 && <Loader2 size={14} className="animate-spin text-gold-400" />)}
+                <div key={i} className={`text-sm rounded-lg p-3 ${m.role === 'user' ? 'bg-paper-200 ml-6' : 'bg-seal-50 border border-seal-100 mr-6'}`}>
+                  {m.content || (chatStreaming && i === chatMessages.length - 1 && <Loader2 size={14} className="animate-spin text-seal" />)}
                 </div>
               ))}
             </div>
-            <div className="p-4 border-t border-ink-700 flex gap-2">
+            <div className="p-4 border-t border-paper-300 flex gap-2">
               <input
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
@@ -516,7 +516,7 @@ export default function ChapterEditor() {
                 placeholder="Ask The Scribe..."
                 disabled={chatStreaming}
               />
-              <button onClick={handleChatSend} disabled={chatStreaming || !chatInput.trim()} className="btn-gold px-3 disabled:opacity-50">
+              <button onClick={handleChatSend} disabled={chatStreaming || !chatInput.trim()} className="btn-primary px-3 disabled:opacity-50">
                 <Send size={16} />
               </button>
             </div>

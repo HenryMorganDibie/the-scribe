@@ -197,19 +197,19 @@ export default function Onboarding() {
   }, [stepIndex])
 
   return (
-    <div className="min-h-screen bg-ink-950 flex flex-col">
+    <div className="min-h-screen bg-paper flex flex-col">
       {/* Header */}
-      <header className="border-b border-ink-700/50 px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-paper-300 px-6 py-4 flex items-center justify-between">
         <QuillLogo size="sm" animate={false} />
-        <span className="text-sm text-ink-400">
+        <span className="text-sm text-study-300">
           Step {stepIndex + 1} of {STEPS.length}
         </span>
       </header>
 
       {/* Progress bar */}
-      <div className="h-1 bg-ink-800">
+      <div className="h-1 bg-paper-200">
         <div
-          className="h-full bg-gold-gradient transition-all duration-500 ease-out"
+          className="h-full bg-seal transition-all duration-500 ease-out"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -219,7 +219,7 @@ export default function Onboarding() {
         <div className="lg:col-span-3 flex items-center justify-center px-6 py-12">
           <div className="w-full max-w-xl animate-fade-in-up" key={stepIndex}>
             <h1 className="font-display text-display-sm font-semibold mb-2">{step.question}</h1>
-            <p className="text-ink-400 mb-6">{step.subtext}</p>
+            <p className="text-study-300 mb-6">{step.subtext}</p>
 
             {step.type === 'text' && (
               <input
@@ -250,8 +250,8 @@ export default function Onboarding() {
                     onClick={() => updateAnswer(opt)}
                     className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
                       currentValue === opt
-                        ? 'border-gold-400 bg-gold-800/40 text-gold-300'
-                        : 'border-ink-600 hover:border-ink-400 text-ink-200'
+                        ? 'border-seal bg-seal-50 text-seal-400'
+                        : 'border-paper-300 hover:border-study-200 text-study-400'
                     }`}
                   >
                     {opt}
@@ -273,13 +273,13 @@ export default function Onboarding() {
                       }}
                       className={`w-full text-left px-4 py-3 rounded-lg border transition-colors flex items-center justify-between ${
                         selected
-                          ? 'border-gold-400 bg-gold-800/40 text-gold-300'
-                          : 'border-ink-600 hover:border-ink-400 text-ink-200'
+                          ? 'border-seal bg-seal-50 text-seal-400'
+                          : 'border-paper-300 hover:border-study-200 text-study-400'
                       }`}
                     >
                       {opt}
                       {selected && (
-                        <span className="text-xs text-gold-400">
+                        <span className="text-xs text-seal">
                           #{(currentValue || []).indexOf(opt) + 1}
                         </span>
                       )}
@@ -309,14 +309,14 @@ export default function Onboarding() {
                         key={idx}
                         className={
                           step.type === 'samples'
-                            ? 'bg-ink-900 border border-ink-600 rounded-lg p-3 text-sm text-ink-300 flex justify-between items-start gap-2'
-                            : 'bg-gold-800/40 border border-gold-700 text-gold-300 text-sm rounded-full px-3 py-1 flex items-center gap-2'
+                            ? 'bg-paper-100 border border-paper-300 rounded-lg p-3 text-sm text-study-400 flex justify-between items-start gap-2'
+                            : 'bg-seal-50 border border-seal-300 text-seal-500 text-sm rounded-full px-3 py-1 flex items-center gap-2'
                         }
                       >
                         <span className={step.type === 'samples' ? 'line-clamp-3' : ''}>
                           {step.type === 'samples' ? `${item.slice(0, 200)}${item.length > 200 ? '...' : ''}` : item}
                         </span>
-                        <button onClick={() => removeTag(idx)} className="text-ink-400 hover:text-red-400 flex-shrink-0">
+                        <button onClick={() => removeTag(idx)} className="text-study-300 hover:text-red-400 flex-shrink-0">
                           ×
                         </button>
                       </div>
@@ -338,7 +338,7 @@ export default function Onboarding() {
               <button
                 onClick={handleNext}
                 disabled={!isStepValid() || submitting}
-                className="btn-gold flex items-center gap-1 disabled:opacity-50"
+                className="btn-primary flex items-center gap-1 disabled:opacity-50"
               >
                 {submitting ? (
                   <>
@@ -357,39 +357,39 @@ export default function Onboarding() {
         </div>
 
         {/* Live Voice Preview panel */}
-        <div className="lg:col-span-2 bg-ink-900/60 border-l border-ink-700/50 px-6 py-12 flex flex-col">
+        <div className="lg:col-span-2 bg-paper-200 border-l border-paper-300 px-6 py-12 flex flex-col">
           <div className="flex items-center gap-2 mb-4">
-            <Sparkles size={18} className="text-gold-400" />
+            <Sparkles size={18} className="text-seal" />
             <h2 className="font-display text-display-xs font-semibold">Live Voice Preview</h2>
           </div>
-          <p className="text-sm text-ink-400 mb-6">
+          <p className="text-sm text-study-300 mb-6">
             As you answer, watch The Scribe begin to write in your emerging voice.
           </p>
 
           <div className="flex-1 card p-5 relative overflow-hidden">
             {previewLoading && !preview && (
-              <div className="flex items-center gap-2 text-ink-400 text-sm">
-                <Loader2 size={16} className="animate-spin text-gold-400" />
+              <div className="flex items-center gap-2 text-study-300 text-sm">
+                <Loader2 size={16} className="animate-spin text-seal" />
                 Listening to your voice...
               </div>
             )}
 
             {!preview && !previewLoading && (
-              <div className="text-ink-500 text-sm italic">
+              <div className="text-ink0 text-sm italic">
                 Your preview will appear here once you've shared a bit more about your voice —
                 keep going.
               </div>
             )}
 
             {preview && (
-              <p className="font-display text-lg leading-relaxed text-ink-100 italic animate-fade-in-up">
+              <p className="font-display text-lg leading-relaxed text-ink italic animate-fade-in-up">
                 {preview}
-                {previewLoading && <span className="inline-block w-2 h-4 bg-gold-400 ml-1 animate-pulse-gold" />}
+                {previewLoading && <span className="inline-block w-2 h-4 bg-seal ml-1 animate-pulse" />}
               </p>
             )}
           </div>
 
-          <div className="mt-4 text-xs text-ink-500">
+          <div className="mt-4 text-xs text-ink0">
             This preview updates as you complete key sections of the interview.
           </div>
         </div>

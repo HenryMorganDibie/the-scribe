@@ -1,106 +1,96 @@
 import { Link } from 'react-router-dom'
-import { Feather, BookOpen, Sparkles, ScrollText, GitBranch, Target } from 'lucide-react'
 import QuillLogo from '@/components/ui/QuillLogo'
 
-const features = [
+const capabilities = [
   {
-    icon: Feather,
-    title: 'Voice DNA',
-    description: 'A structured interview captures your theological lens, signature phrases, cadence, and anchor scriptures — building a living profile of your voice.',
+    label: 'Voice Interview',
+    body: 'A structured conversation about your theological lens, your recurring phrases, the scriptures you return to, and the cadence of your sentences. Nothing generic — every answer becomes part of your profile.',
   },
   {
-    icon: Sparkles,
-    title: 'Live Voice Preview',
-    description: 'Watch your voice come alive in real time as you answer onboarding questions. See exactly how The Scribe is learning to write like you.',
+    label: 'Live Preview',
+    body: "While you're still answering, The Scribe drafts a short passage in the voice it's learning. You see your own voice forming in real time, before onboarding even finishes.",
   },
   {
-    icon: ScrollText,
-    title: 'Testimony Vault',
-    description: 'Store your personal stories and testimonies. The Scribe weaves them into your manuscript naturally — as revelation, not insertion.',
+    label: 'Testimony Vault',
+    body: 'Your personal stories, stored and indexed. When a chapter calls for a testimony, The Scribe retrieves the one that fits — and writes it in as revelation, not as a pasted anecdote.',
   },
   {
-    icon: BookOpen,
-    title: 'Manuscript Studio',
-    description: 'Chapter-by-chapter editor with full chapter memory — your AI ghostwriter remembers what you said three chapters ago.',
+    label: 'Chapter Memory',
+    body: "Every chapter is written with full awareness of what came before — the arguments you've made, the scriptures you've cited, the stories you've told — so the manuscript holds together as one voice.",
   },
   {
-    icon: Target,
-    title: 'Voice Drift Scoring',
-    description: 'Every generated passage is scored against your voice profile. Know instantly if something doesn\'t sound like you.',
+    label: 'Voice Match Scoring',
+    body: 'Any passage can be checked against your profile. The Scribe tells you, plainly, where a paragraph drifts from how you actually write — and why.',
   },
   {
-    icon: GitBranch,
-    title: 'Voice Evolution',
-    description: 'Your voice profile evolves like a git history — track how your writing identity sharpens over time.',
+    label: 'Voice Evolution',
+    body: 'Your profile is versioned. As you write and edit, The Scribe records what changed — new phrases, a shift in cadence — so your voice sharpens with use rather than staying fixed at onboarding.',
   },
 ]
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-ink-950 text-parchment overflow-x-hidden">
-      {/* Nav */}
-      <header className="border-b border-ink-700/50">
-        <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+    <div className="min-h-screen bg-paper text-ink">
+      {/* Header — like the running head of a printed page */}
+      <header className="border-b border-paper-300">
+        <div className="max-w-3xl mx-auto px-6 py-5 flex items-center justify-between">
           <QuillLogo size="md" />
-          <div className="flex items-center gap-3">
-            <Link to="/login" className="btn-ghost text-sm">Log in</Link>
-            <Link to="/signup" className="btn-gold text-sm">Get started</Link>
+          <div className="flex items-center gap-6 text-sm">
+            <Link to="/login" className="text-study-400 hover:text-seal transition-colors">Log in</Link>
+            <Link to="/signup" className="btn-primary text-sm px-4 py-1.5">Begin the interview</Link>
           </div>
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="relative">
-        <div className="absolute inset-0 bg-glow-gold pointer-events-none" />
-        <div className="max-w-4xl mx-auto px-6 pt-24 pb-20 text-center relative">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-gold-700 bg-gold-800/40 text-gold-300 text-xs font-medium mb-8">
-            <Sparkles size={14} />
-            Built for apostolic, prophetic & Spirit-filled voices
-          </div>
-          <h1 className="font-display text-display-lg md:text-display-2xl font-semibold leading-tight mb-6">
-            A ghostwriter who has
-            <br />
-            <span className="text-gold-400 italic">studied you for years.</span>
-          </h1>
-          <p className="text-lg text-ink-300 max-w-2xl mx-auto mb-10 leading-relaxed">
-            The Scribe learns your theological voice — your phrases, your scriptures, your stories,
-            your cadence — and ghostwrites your manuscript exactly as you would write it yourself.
-          </p>
-          <div className="flex items-center justify-center gap-4">
-            <Link to="/signup" className="btn-gold px-8 py-3 text-base">
-              Begin Your Voice Interview
-            </Link>
-          </div>
+      {/* Title page */}
+      <section className="max-w-3xl mx-auto px-6 pt-20 pb-16">
+        <p className="folio mb-4">For apostolic, prophetic, and Spirit-filled writers</p>
+        <h1 className="font-display text-display-lg md:text-display-2xl font-semibold leading-tight mb-6 max-w-2xl">
+          Write the book only you could write — with a ghostwriter who studies how you write it.
+        </h1>
+        <p className="text-lg text-study-400 max-w-xl leading-relaxed mb-8">
+          The Scribe is built around one idea: a generic AI cannot write your testimony, cite the
+          scriptures you actually return to, or sound like the person standing behind your pulpit.
+          So it doesn't try to. It learns your voice first — then writes in it.
+        </p>
+        <Link to="/signup" className="btn-primary inline-block px-6 py-2.5 text-base">
+          Begin your voice interview
+        </Link>
+        <p className="text-sm text-study-300 mt-3">About 10 minutes. No manuscript required to start.</p>
+      </section>
+
+      {/* Scripture — set as a manuscript excerpt, not a hero quote card */}
+      <section className="max-w-3xl mx-auto px-6 pb-16">
+        <div className="card p-8">
+          <p className="folio mb-3">Revelation 12:11 — NKJV</p>
+          <blockquote className="font-manuscript text-xl leading-relaxed text-ink">
+            "And they overcame him by the blood of the Lamb and by the word of their testimony,
+            and they did not love their lives to the death."
+          </blockquote>
         </div>
       </section>
 
-      {/* Features */}
-      <section className="max-w-6xl mx-auto px-6 pb-24">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {features.map(({ icon: Icon, title, description }) => (
-            <div key={title} className="card p-6 animate-fade-in-up">
-              <div className="w-10 h-10 rounded-lg bg-gold-800/60 flex items-center justify-center mb-4">
-                <Icon size={20} className="text-gold-400" />
-              </div>
-              <h3 className="font-display text-display-xs font-semibold mb-2">{title}</h3>
-              <p className="text-sm text-ink-300 leading-relaxed">{description}</p>
+      {/* Capabilities — set as a table of contents / annotated list, not icon cards */}
+      <section className="max-w-3xl mx-auto px-6 pb-20">
+        <h2 className="font-display text-display-sm font-semibold mb-2">What it does</h2>
+        <p className="text-study-400 mb-8">Six parts of the system, in the order you'll meet them.</p>
+
+        <div className="divide-y divide-paper-300">
+          {capabilities.map((c, i) => (
+            <div key={c.label} className="py-6 grid grid-cols-1 md:grid-cols-[3rem_10rem_1fr] gap-2 md:gap-6">
+              <span className="folio">{String(i + 1).padStart(2, '0')}</span>
+              <h3 className="font-display text-display-xs font-semibold">{c.label}</h3>
+              <p className="text-study-400 leading-relaxed">{c.body}</p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Scripture-style quote block */}
-      <section className="max-w-3xl mx-auto px-6 pb-24">
-        <div className="scripture-block text-lg md:text-xl">
-          "And they overcame him by the blood of the Lamb and by the word of their testimony."
-          <div className="text-sm text-gold-400 not-italic mt-2 font-body">— Revelation 12:11</div>
-        </div>
-      </section>
-
       {/* Footer */}
-      <footer className="border-t border-ink-700/50 py-8">
-        <div className="max-w-6xl mx-auto px-6 text-center text-sm text-ink-400">
-          The Scribe — built for those who carry a Word.
+      <footer className="border-t border-paper-300 py-8">
+        <div className="max-w-3xl mx-auto px-6 flex items-center justify-between text-sm text-study-300">
+          <span>The Scribe</span>
+          <span>Built for those who carry a Word.</span>
         </div>
       </footer>
     </div>

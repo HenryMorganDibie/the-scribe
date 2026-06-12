@@ -4,43 +4,91 @@
 
 @layer base {
   body {
-    @apply bg-ink-950 text-ink-50 font-body antialiased;
+    @apply bg-paper text-ink font-body antialiased;
   }
   h1, h2, h3, h4 { @apply font-display; }
 }
 
 @layer components {
+  /* Scripture callout — a marginal note, not a glowing card */
   .scripture-block {
-    @apply border-l-2 border-gold-400 bg-gold-800/40 pl-4 py-2 italic font-display text-ink-100;
+    @apply border-l-2 border-seal pl-4 py-1.5 font-manuscript italic text-study-700;
   }
+
+  /* Surfaces */
   .card {
-    @apply bg-ink-800 border border-ink-700 rounded-xl shadow-card transition-shadow duration-200;
+    @apply bg-paper-50 border border-paper-300 rounded-md shadow-paper transition-shadow duration-150;
   }
   .card:hover {
-    @apply shadow-card-hover;
+    @apply shadow-paper-lift;
   }
-  .btn-gold {
-    @apply bg-gold-gradient text-ink-950 font-semibold rounded-lg px-4 py-2 transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98];
+  .panel-dark {
+    @apply bg-study-700 text-study-50 border border-study-600 rounded-md shadow-study-card;
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply bg-seal text-paper-50 font-medium rounded px-4 py-2 transition-colors duration-150 hover:bg-seal-500 active:bg-seal-600 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-transparent border border-study-300 text-study-700 font-medium rounded px-4 py-2 hover:border-seal hover:text-seal transition-colors duration-150 disabled:opacity-50;
   }
   .btn-ghost {
-    @apply bg-transparent border border-ink-600 text-ink-50 rounded-lg px-4 py-2 hover:border-gold-400 hover:text-gold-400 transition-colors duration-150;
+    @apply bg-transparent text-study-400 hover:text-seal transition-colors duration-150;
   }
+
+  /* Form fields */
   .input-field {
-    @apply bg-ink-900 border border-ink-600 rounded-lg px-3 py-2 text-ink-50 placeholder:text-ink-400 focus:outline-none focus:border-gold-400 focus:ring-1 focus:ring-gold-400/40 transition-colors;
+    @apply bg-paper-50 border border-paper-300 rounded px-3 py-2 text-ink placeholder:text-study-200 focus:outline-none focus:border-seal focus:shadow-focus-seal transition-all;
+  }
+
+  /* Manuscript editor canvas */
+  .manuscript-canvas {
+    @apply font-manuscript text-lg leading-[1.85] text-ink;
+  }
+  .manuscript-canvas p {
+    @apply mb-4;
+  }
+  .manuscript-canvas blockquote {
+    @apply scripture-block my-4;
+  }
+
+  /* Folio / page number style label */
+  .folio {
+    @apply font-mono text-xs uppercase tracking-widest text-study-300;
+  }
+
+  /* Status tags — printer's proof marks, not pill-shaped SaaS badges */
+  .status-tag {
+    @apply text-xs font-mono uppercase tracking-wide px-2 py-0.5 border rounded-sm;
+  }
+  .status-draft       { @apply border-study-300 text-study-400; }
+  .status-in_progress { @apply border-seal-300 text-seal-400 bg-seal-50; }
+  .status-complete    { @apply border-study-500 text-study-700 bg-study-50; }
+}
+
+/* Scrollbar — quiet, paper-toned */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #E0D6C0; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #C8BCA3; }
+
+/* Streaming cursor for live generation */
+.stream-cursor::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  background: #A8462F;
+  vertical-align: text-bottom;
+  animation: cursorBlink 1s step-end infinite;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
-
-/* Quill underline animation for logo */
-.quill-underline {
-  stroke-dasharray: 100;
-  stroke-dashoffset: 100;
-}
-.quill-underline.animate {
-  animation: quillDraw 1.5s ease-out forwards;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: #161616; }
-::-webkit-scrollbar-thumb { background: #3A3530; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #C9A84C; }
