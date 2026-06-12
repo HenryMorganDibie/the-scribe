@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-ink-950 text-ink-50 font-body antialiased;
+  }
+  h1, h2, h3, h4 { @apply font-display; }
+}
+
+@layer components {
+  .scripture-block {
+    @apply border-l-2 border-gold-400 bg-gold-800/40 pl-4 py-2 italic font-display text-ink-100;
+  }
+  .card {
+    @apply bg-ink-800 border border-ink-700 rounded-xl shadow-card transition-shadow duration-200;
+  }
+  .card:hover {
+    @apply shadow-card-hover;
+  }
+  .btn-gold {
+    @apply bg-gold-gradient text-ink-950 font-semibold rounded-lg px-4 py-2 transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98];
+  }
+  .btn-ghost {
+    @apply bg-transparent border border-ink-600 text-ink-50 rounded-lg px-4 py-2 hover:border-gold-400 hover:text-gold-400 transition-colors duration-150;
+  }
+  .input-field {
+    @apply bg-ink-900 border border-ink-600 rounded-lg px-3 py-2 text-ink-50 placeholder:text-ink-400 focus:outline-none focus:border-gold-400 focus:ring-1 focus:ring-gold-400/40 transition-colors;
+  }
+}
+
+/* Quill underline animation for logo */
+.quill-underline {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+}
+.quill-underline.animate {
+  animation: quillDraw 1.5s ease-out forwards;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #161616; }
+::-webkit-scrollbar-thumb { background: #3A3530; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #C9A84C; }
