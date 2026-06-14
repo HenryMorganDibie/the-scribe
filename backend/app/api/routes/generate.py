@@ -20,14 +20,10 @@ from app.services.ai.generation import (
     build_voice_brief,
     get_chapter_memory,
 )
+from app.services.ai.llm_client import get_llm_client, estimate_cost
 from app.core.config import settings
-from anthropic import AsyncAnthropic
 
 router = APIRouter(prefix="/generate", tags=["generation"])
-client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-INPUT_COST = 0.000003
-OUTPUT_COST = 0.000015
 
 
 async def _get_profile(user_id: str, db: AsyncSession) -> VoiceProfile:
@@ -90,7 +86,7 @@ async def generate_chapter(
     project = result.scalar_one_or_none()
 
     start_time = time.time()
-    log = GenerationLog(user_id=current_user.id, chapter_id=chapter.id, action="generate_chapter", model="claude-sonnet-4-20250514")
+    log = GenerationLog(user_id=current_user.id, chapter_id=chapter.id, action="generate_chapter", model=settings.LLM_PROVIDER)
     db.add(log)
 
     async def stream():
@@ -105,6 +101,7 @@ async def generate_chapter(
                     log.tokens_out = int(meta.get("tokens_out", 0))
                     log.cost_usd = float(meta.get("cost", 0))
                     log.latency_ms = int(meta.get("latency", 0))
+                    log.model = meta.get("provider", settings.LLM_PROVIDER)
                     log.success = True
                     await db.commit()
                 else:
@@ -147,13 +144,9 @@ Pick up seamlessly — do not repeat the last sentence.
 ...{body.cursor_text[-500:]}"""
 
     async def stream():
-        async with client.messages.stream(
-            model="claude-sonnet-4-20250514",
-            max_tokens=800,
-            messages=[{"role": "user", "content": prompt}],
-        ) as s:
-            async for text in s.text_stream:
-                yield f"data: {json.dumps({'text': text})}\n\n"
+        llm = get_llm_client()
+        async for chunk in llm.stream(messages=[{"role": "user", "content": prompt}], max_tokens=800):
+            yield f"data: {json.dumps({'text': chunk})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
@@ -191,13 +184,9 @@ Naturally integrate or transition to the testimony. It should feel like revelati
 Write in the author's exact voice. 200–400 words."""
 
     async def stream():
-        async with client.messages.stream(
-            model="claude-sonnet-4-20250514",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}],
-        ) as s:
-            async for text in s.text_stream:
-                yield f"data: {json.dumps({'text': text})}\n\n"
+        llm = get_llm_client()
+        async for chunk in llm.stream(messages=[{"role": "user", "content": prompt}], max_tokens=600):
+            yield f"data: {json.dumps({'text': chunk})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
@@ -228,12 +217,9 @@ Be specific and brief.
 Passage:
 {body.text[:800]}"""
 
-        response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=300,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        feedback = response.content[0].text
+        llm = get_llm_client()
+        result = await llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=300)
+        feedback = result.text
     else:
         feedback = "This passage is strongly in your voice."
 
@@ -273,15 +259,12 @@ Author's anchor scriptures (prioritize these if relevant): {', '.join(anchor) if
 Return JSON array: [{{"ref": "Book Chapter:Verse", "text": "verse text in {translation}", "reason": "why this fits"}}]
 Only verified scriptures. No hallucinated references. Return ONLY valid JSON."""
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=500,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    llm = get_llm_client()
+    result = await llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=500)
 
     import json as json_mod
     try:
-        clean = response.content[0].text.strip().replace("```json", "").replace("```", "")
+        clean = result.text.strip().replace("```json", "").replace("```", "")
         suggestions = json_mod.loads(clean)
     except Exception:
         suggestions = []
@@ -312,14 +295,9 @@ Be direct, warm, and ministerially aware."""
     messages.append({"role": "user", "content": body.message})
 
     async def stream():
-        async with client.messages.stream(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            system=system,
-            messages=messages,
-        ) as s:
-            async for text in s.text_stream:
-                yield f"data: {json.dumps({'text': text})}\n\n"
+        llm = get_llm_client()
+        async for chunk in llm.stream(messages=messages, system=system, max_tokens=1000):
+            yield f"data: {json.dumps({'text': chunk})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
