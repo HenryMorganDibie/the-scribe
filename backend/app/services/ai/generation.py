@@ -11,10 +11,13 @@ from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
-from app.core.config import settings
 from app.models import VoiceProfile, DocumentEmbedding, Testimony, Scripture, Chapter
 from app.services.voice.embeddings import EmbeddingService
 from app.services.ai.llm_client import get_llm_client, estimate_cost
+
+import structlog
+
+logger = structlog.get_logger()
 
 
 embedding_service = EmbeddingService()
@@ -328,12 +331,19 @@ Return ONLY valid JSON. No markdown, no explanation."""
     result = await llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=2000)
 
     import json
+    raw = result.text.strip()
     try:
-        text = result.text.strip()
+        text = raw
         if text.startswith("```"):
             text = text.strip("`").lstrip("json").strip()
         return json.loads(text)
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "voice_dna_extraction_parse_failed",
+            user_id=profile.user_id,
+            error=str(e),
+            raw_response_preview=raw[:300],
+        )
         return {}
 
 

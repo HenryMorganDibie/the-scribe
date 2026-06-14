@@ -87,6 +87,20 @@ def index_writing_samples_task(user_id: str):
     asyncio.run(_run())
 
 
+@dramatiq.actor(queue_name="embeddings", max_retries=3)
+def index_testimony_task(user_id: str, testimony_id: str, story: str):
+    """Index a single testimony into pgvector for retrieval."""
+    import asyncio
+    from app.db.session import AsyncSessionLocal
+    from app.services.voice.embeddings import index_testimony
+
+    async def _run():
+        async with AsyncSessionLocal() as db:
+            await index_testimony(user_id, testimony_id, story, db)
+
+    asyncio.run(_run())
+
+
 @dramatiq.actor(queue_name="chapter_ops", max_retries=2)
 def generate_chapter_summary_task(chapter_id: str):
     """Generate and store a chapter summary after content is saved."""

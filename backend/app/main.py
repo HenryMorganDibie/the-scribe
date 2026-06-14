@@ -1,11 +1,36 @@
+"""
+The Scribe API — application entrypoint.
+
+Run locally:    uvicorn app.main:app --reload --port 8000
+Run in prod:    uvicorn app.main:app --host 0.0.0.0 --port $PORT
+(see railway.json / Dockerfile for the exact production start command)
+"""
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import structlog
 
 from app.core.config import settings
+from app.db.session import engine
 from app.api.routes import auth, onboarding, projects, voice, generate, export
 
 logger = structlog.get_logger()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings.validate_for_startup()
+    logger.info(
+        "the_scribe_api_starting",
+        environment=settings.ENVIRONMENT,
+        llm_provider=settings.LLM_PROVIDER,
+    )
+    yield
+    await engine.dispose()
+    logger.info("the_scribe_api_shutdown")
+
 
 app = FastAPI(
     title="The Scribe API",
@@ -13,6 +38,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
+    lifespan=lifespan,
 )
 
 # CORS
@@ -35,9 +61,31 @@ app.include_router(export.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "the-scribe-api"}
+    """
+    Liveness check — used by Railway/Docker health checks.
+    Returns service status and confirms config/LLM provider, without
+    making an external API call.
+    """
+    return {
+        "status": "ok",
+        "service": "the-scribe-api",
+        "environment": settings.ENVIRONMENT,
+        "llm_provider": settings.LLM_PROVIDER,
+    }
 
 
-@app.on_event("startup")
-async def startup():
-    logger.info("The Scribe API starting up", environment=settings.ENVIRONMENT)
+@app.get("/api/health/db")
+async def health_db():
+    """
+    Readiness check — verifies the database connection is alive.
+    Useful for confirming DATABASE_URL is correctly wired after deployment.
+    """
+    from sqlalchemy import text
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        logger.error("health_db_check_failed", error=str(e))
+        return JSONResponse(status_code=503, content={"status": "error", "database": "unreachable"})

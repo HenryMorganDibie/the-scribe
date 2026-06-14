@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.models import User, VoiceProfile
 from app.core.security import get_current_user
 from app.services.ai.generation import generate_voice_preview_stream
+from app.utils.jobs import fire_background_job
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
@@ -155,13 +156,11 @@ async def complete_onboarding(
 
     await db.commit()
 
-    # Fire background jobs
-    try:
-        from app.workers.tasks import extract_voice_dna_task, index_writing_samples_task
-        extract_voice_dna_task.send(current_user.id)
-        if profile.writing_samples:
-            index_writing_samples_task.send(current_user.id)
-    except Exception:
-        pass  # Jobs are non-blocking — app works without Redis in dev
+    # Fire background jobs — non-blocking; see app.utils.jobs for failure handling
+    from app.workers.tasks import extract_voice_dna_task, index_writing_samples_task
+
+    fire_background_job(extract_voice_dna_task, current_user.id, job_name="extract_voice_dna")
+    if profile.writing_samples:
+        fire_background_job(index_writing_samples_task, current_user.id, job_name="index_writing_samples")
 
     return {"onboarded": True, "message": "Voice profile is being processed in the background."}

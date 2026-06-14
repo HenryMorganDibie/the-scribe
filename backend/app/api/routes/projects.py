@@ -7,6 +7,7 @@ from typing import Optional, List
 from app.db.session import get_db
 from app.models import User, Project, Chapter
 from app.core.security import get_current_user
+from app.utils.jobs import fire_background_job
 
 router = APIRouter(tags=["projects"])
 
@@ -167,11 +168,8 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
 
     # Fire summary generation if content was updated
     if body.content:
-        try:
-            from app.workers.tasks import generate_chapter_summary_task
-            generate_chapter_summary_task.send(chapter_id)
-        except Exception:
-            pass
+        from app.workers.tasks import generate_chapter_summary_task
+        fire_background_job(generate_chapter_summary_task, chapter_id, job_name="generate_chapter_summary")
 
     return {"updated": True}
 
