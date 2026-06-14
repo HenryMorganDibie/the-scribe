@@ -9,6 +9,26 @@ material via embeddings rather than stuffing everything into one prompt.
 
 ---
 
+## Choose your path
+
+This repo supports two ways of running The Scribe, and the same codebase works
+for both — no separate branches or config forks.
+
+| | **Local development** | **Railway (or similar PaaS)** |
+|---|---|---|
+| Use this when | Developing, testing, recording a demo | You want a live URL to share (e.g. as a portfolio link) |
+| Database | Docker Compose Postgres+pgvector | Railway Postgres plugin (or Supabase) |
+| Setup time | ~10 minutes | ~15 minutes after local setup works |
+| Section to follow | [Setup](#setup) → [Running it](#running-it) | [Deploying to Railway](#deploying-to-railway) |
+
+**Recommendation**: get it running locally first (it's faster to iterate and
+debug), confirm the [smoke test](#1-one-command-end-to-end-smoke-test-recommended)
+passes, *then* deploy to Railway if you want a live link. The Railway setup
+reuses the same `Dockerfile`, `DATABASE_URL`-based config, and migrations —
+nothing about local development changes if you never touch Railway.
+
+---
+
 ## Table of contents
 
 - [What's actually in here](#whats-actually-in-here)
@@ -29,7 +49,12 @@ material via embeddings rather than stuffing everything into one prompt.
 - [Project structure](#project-structure)
 - [Design system](#design-system)
 - [Known limitations / what's stubbed](#known-limitations--whats-stubbed)
-- [Deployment notes](#deployment-notes)
+- [Deploying to Railway](#deploying-to-railway)
+  - [1. Postgres with pgvector](#1-postgres-with-pgvector)
+  - [2. Redis](#2-redis)
+  - [3. API service](#3-api-service)
+  - [4. Worker service](#4-worker-service)
+  - [5. Frontend (Vercel)](#5-frontend-vercel)
 
 ---
 
@@ -43,6 +68,8 @@ material via embeddings rather than stuffing everything into one prompt.
 | pgvector embeddings + RAG retrieval | `backend/app/services/voice/embeddings.py`, `retrieve_relevant_context` in `generation.py` |
 | Voice Brief builder (the "ghost brief") | `build_voice_brief` in `app/services/ai/generation.py` |
 | LLM provider abstraction (Anthropic / Groq) | `backend/app/services/ai/llm_client.py` |
+| Health checks (liveness + DB readiness) | `GET /api/health`, `GET /api/health/db` in `app/main.py` |
+| Non-blocking background jobs with logging | `backend/app/utils/jobs.py` |
 | Chapter memory (prior-chapter summaries) | `get_chapter_memory` in `generation.py`, `generate_chapter_summary_task` |
 | Voice drift / match scoring | `score_voice_match`, `POST /api/generate/voice-check` |
 | Scripture index (seeded, themed) | `backend/scripts/seed_scriptures.py`, `Scripture` model |
@@ -166,11 +193,10 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env` (minimum needed to run locally):
 
 ```env
 DATABASE_URL=postgresql+asyncpg://scribe:scribe@localhost:5432/thescribe
-SYNC_DATABASE_URL=postgresql://scribe:scribe@localhost:5432/thescribe
 
 # Pick one provider — see "LLM provider" section above
 LLM_PROVIDER=groq
@@ -181,6 +207,11 @@ SECRET_KEY=generate-a-random-string-here
 REDIS_URL=redis://localhost:6379/0
 CORS_ORIGINS=["http://localhost:5173"]
 ```
+
+A single `DATABASE_URL` is all the database config needed — `app/core/config.py`
+normalizes whatever Postgres scheme it's given (this is what lets the exact same
+`.env` structure work against Railway's or Supabase's connection strings later,
+covered in [Deploying to Railway](#deploying-to-railway)).
 
 Run migrations and seed the scripture index:
 
@@ -200,6 +231,11 @@ uvicorn app.main:app --reload --port 8000
 Visit `http://localhost:8000/api/docs` — you should see the full FastAPI/Swagger
 docs for every route described in the table above.
 
+Two health endpoints are useful for confirming setup:
+- `GET /api/health` — basic liveness, also reports the active `LLM_PROVIDER`
+- `GET /api/health/db` — confirms the database connection is alive (returns
+  `503` if `DATABASE_URL` is wrong or Postgres isn't reachable)
+
 **(Optional) Start the background worker** — needed for Voice DNA extraction and
 chapter summaries to run automatically. In a second terminal:
 
@@ -210,9 +246,12 @@ dramatiq app.workers.tasks
 ```
 
 Without this running, onboarding still completes and the app remains usable —
-the voice profile just won't get its AI-extracted signature phrases / cadence
-score / voice summary until you run the worker (or restart it later; the job
-is queued in Redis and will be picked up whenever a worker is running).
+background jobs (voice DNA extraction, embedding indexing, chapter summaries)
+are dispatched non-blockingly via `app/utils/jobs.py`: if Redis/Dramatiq isn't
+reachable, the request still succeeds and a warning is logged
+(`background_job_enqueue_failed`) rather than failing silently. Start the
+worker later and re-trigger onboarding completion (or just wait — jobs queue in
+Redis) to backfill.
 
 ### 3. Frontend
 
@@ -520,28 +559,36 @@ next highest-value additions.
 
 ```
 the-scribe/
-├── docker-compose.yml          # Postgres+pgvector, Redis
+├── docker-compose.yml          # Local: Postgres+pgvector, Redis
 ├── backend/
+│   ├── Dockerfile               # Production image (API + worker share this)
+│   ├── railway.json              # Railway service config for the API
 │   ├── app/
 │   │   ├── api/routes/          # auth, onboarding, projects, voice, generate, export
-│   │   ├── core/                 # config, JWT/security
+│   │   ├── core/                 # config (DATABASE_URL normalization,
+│   │   │                         #   startup validation), JWT/security
 │   │   ├── db/                   # async session, Base
 │   │   ├── models/                # SQLAlchemy models (users, voice_profiles,
 │   │   │                          #   voice_versions, document_embeddings,
 │   │   │                          #   testimonies, scriptures, projects,
 │   │   │                          #   chapters, generation_logs)
 │   │   ├── services/
+│   │   │   ├── ai/llm_client.py    # Anthropic / Groq provider abstraction
 │   │   │   ├── ai/generation.py   # voice brief builder, chapter generation,
 │   │   │   │                      #   voice preview, voice DNA extraction,
 │   │   │   │                      #   voice match scoring
 │   │   │   ├── voice/embeddings.py # pgvector embedding + chunking
 │   │   │   ├── voice/timeline.py   # voice version snapshots + diffs
 │   │   │   └── export/docx_export.py
+│   │   ├── utils/jobs.py          # non-blocking background job dispatch + logging
 │   │   └── workers/tasks.py       # Dramatiq background jobs
 │   ├── alembic/                   # migrations (0001_initial_schema creates
 │   │                               #   everything incl. pgvector index)
-│   └── scripts/seed_scriptures.py
+│   └── scripts/
+│       ├── seed_scriptures.py
+│       └── smoke_test.py          # end-to-end demo/test script
 └── frontend/
+    ├── vercel.json                # SPA rewrites for React Router on Vercel
     └── src/
         ├── pages/                  # Landing, Login, Signup, Onboarding,
         │                           #   Dashboard, VoiceProfile, Testimonies,
@@ -579,8 +626,9 @@ in `frontend/src/styles/globals.css`.
   the suggestion endpoint to query `scriptures` first (and fall back to Claude only
   for thematic matching) is a natural next step.
 - **Embeddings** use `sentence-transformers` (`all-MiniLM-L6-v2`, 384-dim) running
-  locally on CPU — fine for demo-scale data, but the first embedding call after a
-  cold start will download the model (~90MB).
+  locally on CPU — fine for demo-scale data. Locally, the first embedding call
+  downloads the model (~90MB); the production `Dockerfile` pre-downloads it at
+  build time so the deployed API/worker never pay this cost at request time.
 - **LLM provider**: the app runs on Anthropic (Claude Sonnet 4) or Groq
   (Llama 3.3 70B), switchable via `LLM_PROVIDER` in `.env` — see
   [LLM provider](#llm-provider-anthropic-vs-groq) above. Groq's free tier doesn't
@@ -594,19 +642,115 @@ in `frontend/src/styles/globals.css`.
 
 ---
 
-## Deployment notes
+## Deploying to Railway
 
-- **Backend**: any container host that can run `uvicorn` + a Postgres connection
-  works (Railway, Render, Fly.io). Run `alembic upgrade head` and
-  `python scripts/seed_scriptures.py` as part of your deploy step.
-- **Worker**: deploy `dramatiq app.workers.tasks` as a separate process/service
-  pointed at the same Redis and database.
-- **Frontend**: static build via `npm run build` → `dist/` — deploy to Vercel,
-  Netlify, or any static host. Set `VITE_API_URL` to your deployed backend's
-  `/api` path.
-- **Database**: any Postgres 15+ with the `vector` extension available (Supabase
-  has this built in — enable it in the Database → Extensions panel before running
-  migrations).
+The backend ships with everything Railway needs: `backend/Dockerfile`,
+`backend/railway.json`, and a config layer (`app/core/config.py`) that accepts
+Railway's injected `DATABASE_URL` and `PORT` without modification. This section
+assumes local setup already works — Railway runs the *same* image and migrations,
+just against managed Postgres/Redis instead of Docker Compose.
+
+You'll create **four services** in one Railway project: Postgres, Redis, the API,
+and a worker. The frontend deploys separately to Vercel (or Netlify).
+
+### 1. Postgres with pgvector
+
+Railway's default Postgres template does not include the `vector` extension.
+Two options, in order of preference:
+
+- **Railway template gallery**: search for a "PostgreSQL + pgvector" template
+  when adding a new service. If available, use it — it behaves identically to
+  `ankane/pgvector` used in `docker-compose.yml`.
+- **Supabase fallback**: if no pgvector template is available, create a free
+  Supabase project instead (pgvector is enabled by default under
+  Database → Extensions) and use its connection string as `DATABASE_URL` for
+  the Railway services below. Everything else (Redis, API, worker) still runs
+  on Railway.
+
+Either way, copy the resulting Postgres connection string — you'll set it as
+`DATABASE_URL` on both the API and worker services. Railway lets you reference
+a Postgres service's URL directly as `${{Postgres.DATABASE_URL}}` in another
+service's variables, which is the cleanest approach if you used the Railway
+template.
+
+### 2. Redis
+
+Add Redis from Railway's template gallery (one click). Reference it as
+`${{Redis.REDIS_URL}}` in the API and worker services' variables.
+
+### 3. API service
+
+"Deploy from GitHub repo" → select this repo → **set the root directory to
+`/backend`**. Railway will detect `backend/railway.json` and `backend/Dockerfile`
+automatically.
+
+Environment variables (Settings → Variables):
+
+```env
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+REDIS_URL=${{Redis.REDIS_URL}}
+
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+
+SECRET_KEY=<generate a long random string>
+ENVIRONMENT=production
+
+CORS_ORIGINS=["https://your-frontend.vercel.app"]
+```
+
+`PORT` is injected by Railway automatically — `railway.json`'s start command
+already uses `$PORT`. On deploy, the start command runs
+`alembic upgrade head && python scripts/seed_scriptures.py && uvicorn ...` —
+migrations and scripture seeding happen automatically on every deploy
+(seeding is idempotent — it skips references that already exist).
+
+Once deployed, confirm with:
+```bash
+curl https://your-api.up.railway.app/api/health
+curl https://your-api.up.railway.app/api/health/db
+```
+
+### 4. Worker service
+
+Add a **second service from the same GitHub repo and root directory
+(`/backend`)** — same Dockerfile, same image. The only difference is the start
+command, which you override in this service's Settings → Deploy:
+
+```
+dramatiq app.workers.tasks
+```
+
+Give it the same `DATABASE_URL`, `REDIS_URL`, `LLM_PROVIDER`, and provider API
+key as the API service (Railway lets you copy variables between services in
+one click). This is what makes Voice DNA extraction, embedding indexing, and
+chapter summaries run in production.
+
+### 5. Frontend (Vercel)
+
+`frontend/vercel.json` is already configured (Vite build, SPA rewrites for
+React Router). Import the repo into Vercel, **set the root directory to
+`/frontend`**, and set:
+
+```env
+VITE_API_URL=https://your-api.up.railway.app/api
+```
+
+Then add that Vercel URL to the API service's `CORS_ORIGINS` on Railway and
+redeploy the backend.
+
+### Notes
+
+- `ENVIRONMENT=production` activates `validate_for_startup()` — the API will
+  refuse to start if `SECRET_KEY` is still the placeholder or if the active
+  `LLM_PROVIDER`'s API key is missing. This is intentional: fail at deploy time,
+  not on the first user request.
+- None of this affects local development. `docker-compose.yml`,
+  `backend/.env`, and `frontend/.env.local` are untouched by any of the above —
+  Railway and local dev are two independent targets for the same code.
+- Generation logs (`generation_logs` table) record cost/latency per request
+  regardless of environment — useful for sanity-checking token spend after a
+  few demo runs against the live Railway deployment.
 
 ---
 

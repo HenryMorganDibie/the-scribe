@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.models import User, VoiceProfile, Testimony
 from app.core.security import get_current_user
 from app.services.voice.timeline import get_timeline, snapshot_voice, diff_versions
+from app.utils.jobs import fire_background_job
 
 router = APIRouter(tags=["voice"])
 
@@ -115,12 +116,9 @@ async def create_testimony(body: TestimonyCreate, current_user: User = Depends(g
     await db.commit()
     await db.refresh(t)
 
-    # Index for vector retrieval
-    try:
-        from app.services.voice.embeddings import index_testimony
-        await index_testimony(current_user.id, t.id, t.story, db)
-    except Exception:
-        pass
+    # Index for vector retrieval — non-blocking, see app.utils.jobs
+    from app.workers.tasks import index_testimony_task
+    fire_background_job(index_testimony_task, current_user.id, t.id, t.story, job_name="index_testimony")
 
     return {"id": t.id, "title": t.title}
 

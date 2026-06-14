@@ -1,3 +1,12 @@
+"""
+Alembic migration environment.
+
+Runs migrations asynchronously against settings.async_database_url (asyncpg) —
+this avoids needing psycopg2 as an extra dependency just for migrations.
+Works identically against local Postgres+pgvector (docker-compose) and any
+managed Postgres (Railway, Supabase) since the URL is normalized in
+app.core.config regardless of the scheme the platform provides.
+"""
 import asyncio
 from logging.config import fileConfig
 from sqlalchemy import pool
@@ -6,10 +15,10 @@ from alembic import context
 
 from app.core.config import settings
 from app.db.session import Base
-import app.models  # noqa: F401 — ensure all models are imported
+import app.models  # noqa: F401 — ensure all models are registered on Base.metadata
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.SYNC_DATABASE_URL or settings.DATABASE_URL.replace("asyncpg", "psycopg2"))
+config.set_main_option("sqlalchemy.url", settings.async_database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
