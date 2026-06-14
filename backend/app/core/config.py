@@ -10,7 +10,13 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_KEY: str = ""
 
-    ANTHROPIC_API_KEY: str
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+
+    # LLM provider switch — "anthropic" (production) or "groq" (free, for dev/demo)
+    LLM_PROVIDER: str = "anthropic"
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"

@@ -8,21 +8,16 @@ retrieving only the most relevant samples and testimonies via pgvector similarit
 import time
 from typing import Optional, List
 
-from anthropic import AsyncAnthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
 from app.core.config import settings
 from app.models import VoiceProfile, DocumentEmbedding, Testimony, Scripture, Chapter
 from app.services.voice.embeddings import EmbeddingService
+from app.services.ai.llm_client import get_llm_client, estimate_cost
 
 
-client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 embedding_service = EmbeddingService()
-
-# Cost per token (claude-sonnet-4)
-INPUT_COST_PER_TOKEN = 0.000003
-OUTPUT_COST_PER_TOKEN = 0.000015
 
 
 def _cadence_description(score: float) -> str:
@@ -249,28 +244,22 @@ Write the full chapter draft. Target 1,500–2,500 words.
 - Use their signature phrases naturally, not mechanically
 """
 
-    tokens_in = 0
-    tokens_out = 0
+    llm = get_llm_client()
 
-    async with client.messages.stream(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4000,
+    async for chunk in llm.stream(
         messages=[{"role": "user", "content": chapter_prompt}],
-    ) as stream:
-        async for text in stream.text_stream:
-            tokens_out += 1  # approximate; real count from final message
-            yield text
+        max_tokens=4000,
+    ):
+        yield chunk
 
-        # Get final usage from stream
-        final_message = await stream.get_final_message()
-        tokens_in = final_message.usage.input_tokens
-        tokens_out = final_message.usage.output_tokens
-
+    usage = llm.last_usage
     latency_ms = int((time.time() - start_time) * 1000)
-    cost_usd = (tokens_in * INPUT_COST_PER_TOKEN) + (tokens_out * OUTPUT_COST_PER_TOKEN)
+    cost_usd = estimate_cost(llm.provider, usage) if usage else 0.0
+    tokens_in = usage.input_tokens if usage else 0
+    tokens_out = usage.output_tokens if usage else 0
 
     # Yield metadata sentinel for the route handler to capture
-    yield f"\n\n[META:tokens_in={tokens_in},tokens_out={tokens_out},cost={cost_usd:.6f},latency={latency_ms}]"
+    yield f"\n\n[META:tokens_in={tokens_in},tokens_out={tokens_out},cost={cost_usd:.6f},latency={latency_ms},provider={llm.provider}]"
 
 
 async def generate_voice_preview_stream(onboarding_data: dict, profile: Optional[VoiceProfile] = None):
@@ -301,13 +290,9 @@ Pick a topic: the moment God calls someone into their purpose.
 Make it feel distinctly like THIS author — not generic Christian writing.
 No preamble. Just the paragraph."""
 
-    async with client.messages.stream(
-        model="claude-sonnet-4-20250514",
-        max_tokens=300,
-        messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        async for text in stream.text_stream:
-            yield text
+    llm = get_llm_client()
+    async for chunk in llm.stream(messages=[{"role": "user", "content": prompt}], max_tokens=300):
+        yield chunk
 
 
 async def extract_voice_dna(profile: VoiceProfile, db: AsyncSession) -> dict:
@@ -339,15 +324,15 @@ Return a JSON object with exactly these keys:
 
 Return ONLY valid JSON. No markdown, no explanation."""
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    llm = get_llm_client()
+    result = await llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=2000)
 
     import json
     try:
-        return json.loads(response.content[0].text)
+        text = result.text.strip()
+        if text.startswith("```"):
+            text = text.strip("`").lstrip("json").strip()
+        return json.loads(text)
     except Exception:
         return {}
 
@@ -361,12 +346,9 @@ Keep to 150 words max.
 Chapter: {title}
 Content: {content[:3000]}"""
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=300,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return response.content[0].text
+    llm = get_llm_client()
+    result = await llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=300)
+    return result.text
 
 
 async def score_voice_match(content: str, profile: VoiceProfile) -> float:

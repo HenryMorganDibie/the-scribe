@@ -14,6 +14,7 @@ material via embeddings rather than stuffing everything into one prompt.
 - [What's actually in here](#whats-actually-in-here)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
+- [LLM provider: Anthropic vs Groq](#llm-provider-anthropic-vs-groq)
 - [Setup](#setup)
   - [1. Database (Postgres + pgvector)](#1-database-postgres--pgvector)
   - [2. Backend](#2-backend)
@@ -21,9 +22,10 @@ material via embeddings rather than stuffing everything into one prompt.
 - [Running it](#running-it)
 - [Using the app — a walkthrough](#using-the-app--a-walkthrough)
 - [Testing](#testing)
-  - [Smoke-testing the API directly](#smoke-testing-the-api-directly)
-  - [Testing the AI generation features](#testing-the-ai-generation-features)
-  - [Backend test suite](#backend-test-suite)
+  - [1. One-command end-to-end smoke test](#1-one-command-end-to-end-smoke-test-recommended)
+  - [2. Manual curl walkthrough](#2-manual-curl-walkthrough)
+  - [3. UI walkthrough (for the recorded demo)](#3-ui-walkthrough-for-the-recorded-demo)
+  - [4. Backend unit tests](#4-backend-unit-tests)
 - [Project structure](#project-structure)
 - [Design system](#design-system)
 - [Known limitations / what's stubbed](#known-limitations--whats-stubbed)
@@ -40,6 +42,7 @@ material via embeddings rather than stuffing everything into one prompt.
 | Voice DNA extraction (background job) | `backend/app/workers/tasks.py` → `extract_voice_dna_task` |
 | pgvector embeddings + RAG retrieval | `backend/app/services/voice/embeddings.py`, `retrieve_relevant_context` in `generation.py` |
 | Voice Brief builder (the "ghost brief") | `build_voice_brief` in `app/services/ai/generation.py` |
+| LLM provider abstraction (Anthropic / Groq) | `backend/app/services/ai/llm_client.py` |
 | Chapter memory (prior-chapter summaries) | `get_chapter_memory` in `generation.py`, `generate_chapter_summary_task` |
 | Voice drift / match scoring | `score_voice_match`, `POST /api/generate/voice-check` |
 | Scripture index (seeded, themed) | `backend/scripts/seed_scriptures.py`, `Scripture` model |
@@ -87,7 +90,48 @@ the author's actual material rather than a generic prompt template.
 - **Node.js 18+** and npm
 - **PostgreSQL 15+ with the `pgvector` extension** (or use the provided `docker-compose.yml`)
 - **Redis** (for background jobs — optional in dev, the app degrades gracefully without it)
-- An **Anthropic API key** (`ANTHROPIC_API_KEY`)
+- An LLM provider key — **either**:
+  - an **Anthropic API key** (`ANTHROPIC_API_KEY`) — this is the production target
+    and what the final demo/submission should run on, **or**
+  - a **Groq API key** (`GROQ_API_KEY`, free at [console.groq.com](https://console.groq.com)) —
+    useful for development iteration without spending Anthropic credits
+
+---
+
+## LLM provider: Anthropic vs Groq
+
+The Scribe talks to its LLM through one abstraction
+(`backend/app/services/ai/llm_client.py`), so the provider is a one-line config
+change — nothing else in the codebase changes.
+
+| | Anthropic (`claude-sonnet-4`) | Groq (`llama-3.3-70b-versatile`) |
+|---|---|---|
+| Cost | Paid (~$3/$15 per M tokens in/out) | Free tier |
+| Speed | Fast | Very fast |
+| Output quality for this use case | Best — strongest at sustained voice-matching and theological nuance over long generations | Good — solid for iterating on prompts, UI, and the demo flow; voice-matching is noticeably less precise on long chapters |
+| Recommended for | Final demo recording, submission, anything you'll show reviewers | Local development, rapid prompt iteration, rehearsing the demo flow for free |
+
+Set the provider in `backend/.env`:
+
+```env
+LLM_PROVIDER=anthropic   # or "groq"
+
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
+
+GROQ_API_KEY=gsk_...
+GROQ_MODEL=llama-3.3-70b-versatile
+```
+
+Restart the backend after changing `LLM_PROVIDER` — no code changes needed.
+Every `generation_logs` row records which provider produced it, so you can
+compare quality side-by-side if you generate the same chapter under both.
+
+**Recommendation for this project**: develop and rehearse on Groq (free, fast
+iteration), then switch to `LLM_PROVIDER=anthropic` for the final demo recording
+and for whatever output you submit. The quality difference is real, especially
+on full chapter generations — Claude holds the voice brief and chapter memory
+more consistently over 1,500+ words.
 
 ---
 
@@ -127,7 +171,12 @@ Edit `.env`:
 ```env
 DATABASE_URL=postgresql+asyncpg://scribe:scribe@localhost:5432/thescribe
 SYNC_DATABASE_URL=postgresql://scribe:scribe@localhost:5432/thescribe
-ANTHROPIC_API_KEY=sk-ant-...your-key...
+
+# Pick one provider — see "LLM provider" section above
+LLM_PROVIDER=groq
+GROQ_API_KEY=gsk_...your-key...
+# ANTHROPIC_API_KEY=sk-ant-...your-key...
+
 SECRET_KEY=generate-a-random-string-here
 REDIS_URL=redis://localhost:6379/0
 CORS_ORIGINS=["http://localhost:5173"]
@@ -270,13 +319,99 @@ a demo.
 
 ## Testing
 
-### Smoke-testing the API directly
+There are three layers here: a one-command end-to-end smoke test (the fastest way
+to prove everything works), manual curl calls for poking at individual endpoints,
+and a small pytest scaffold for the core logic. For a reviewer demo, the smoke
+test plus a short walkthrough in the UI is the strongest combination — it proves
+the backend works independent of the UI, then shows the UI is just a thin layer
+on top of a real system.
 
-With the backend running, the fastest sanity check is the Swagger UI at
-`http://localhost:8000/api/docs` — every endpoint can be exercised from there once
-you've obtained a bearer token.
+### 1. One-command end-to-end smoke test (recommended)
 
-Or via `curl`:
+`backend/scripts/smoke_test.py` runs the entire user journey against your running
+backend — signup, onboarding, live voice preview, voice DNA check, create
+manuscript, create chapter, **generate a full chapter in the author's voice
+(streamed)**, voice match scoring, and DOCX export. It prints readable,
+narratable output at each step.
+
+```bash
+# Terminal 1
+cd backend && source venv/bin/activate
+uvicorn app.main:app --reload
+
+# Terminal 2 (optional but recommended — enables Voice DNA extraction)
+cd backend && source venv/bin/activate
+dramatiq app.workers.tasks
+
+# Terminal 3
+cd backend && source venv/bin/activate
+python scripts/smoke_test.py
+```
+
+Expected output (abridged):
+
+```
+============================================================
+  1/8  Signing up demo author
+  demo-1718...@thescribe.test
+============================================================
+✓ Account created. Token acquired.
+
+============================================================
+  2/8  Completing voice onboarding interview
+============================================================
+✓ Onboarding complete. Voice DNA is being processed...
+
+============================================================
+  3/8  Streaming live voice preview
+============================================================
+✓ Preview generated:
+
+  "Let that sink in — before the foundations of the earth were laid..."
+
+============================================================
+  4/8  Checking voice profile (background DNA extraction)
+============================================================
+✓ Voice DNA extracted:
+  Cadence score: 0.35
+  Signature phrases: ['This is your set time', 'Let that sink in', ...]
+
+...
+
+============================================================
+  7/8  Generating chapter draft in author's voice (this is the main feature)
+============================================================
+There is a season every called person walks through...
+[full ~1,800 word chapter streams to the terminal in real time]
+
+✓ Generated 1,847 words in 14.2s
+
+============================================================
+  8/8  Running voice match check + exporting manuscript
+============================================================
+✓ Voice match: 87% (Strong)
+  Feedback: This passage is strongly in your voice.
+✓ Manuscript exported to /tmp/the-scribe-demo-export.docx (38214 bytes)
+
+============================================================
+  DONE — full journey completed successfully
+============================================================
+```
+
+This is a good script to run live on screen while narrating — it's the fastest
+way to prove the system works end-to-end, including the parts (background voice
+DNA extraction, embeddings, chapter memory) that aren't visually obvious in the UI.
+
+Run it once with `LLM_PROVIDER=groq` while developing (free), then once with
+`LLM_PROVIDER=anthropic` before recording your final demo to confirm output
+quality on the production provider.
+
+### 2. Manual curl walkthrough
+
+If you want to inspect individual responses (e.g. to check the exact shape of
+the voice brief, or debug a specific endpoint), the Swagger UI at
+`http://localhost:8000/api/docs` lets you authenticate once and try every route
+interactively. Or via `curl`:
 
 ```bash
 # 1. Sign up
@@ -290,27 +425,7 @@ TOKEN=$(python3 -c "import json;print(json.load(open('/tmp/signup.json'))['acces
 # 2. Check auth works
 curl -s http://localhost:8000/api/auth/me -H "Authorization: Bearer $TOKEN"
 
-# 3. Save an onboarding step
-curl -s -X PUT http://localhost:8000/api/onboarding/step \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"step":1,"field":"theological_lens","value":"Prophetic"}'
-
-# 4. Stream a live voice preview (SSE — pipe through cat to see chunks arrive)
-curl -N -s -X POST http://localhost:8000/api/onboarding/preview \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### Testing the AI generation features
-
-These require `ANTHROPIC_API_KEY` to be set and valid — without it, every
-`/api/generate/*` and `/api/onboarding/preview` call will fail with an
-authentication error from Anthropic (everything else in the app works fine
-without a key).
-
-A minimal end-to-end generation test:
-
-```bash
-# Complete onboarding with minimal data
+# 3. Complete onboarding (minimal data)
 curl -s -X POST http://localhost:8000/api/onboarding/complete \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{
@@ -326,19 +441,23 @@ curl -s -X POST http://localhost:8000/api/onboarding/complete \
     }
   }'
 
-# Create a project
+# 4. Stream a live voice preview (SSE — chunks print as they arrive)
+curl -N -s -X POST http://localhost:8000/api/onboarding/preview \
+  -H "Authorization: Bearer $TOKEN"
+
+# 5. Create a project
 PROJECT=$(curl -s -X POST http://localhost:8000/api/projects \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"title":"Called","genre":"teaching","theme":"Finding purpose in the wilderness season","target_chapters":5}')
 PROJECT_ID=$(python3 -c "import json,sys;print(json.loads('$PROJECT')['id'])")
 
-# Add a chapter
+# 6. Add a chapter
 CHAPTER=$(curl -s -X POST http://localhost:8000/api/projects/$PROJECT_ID/chapters \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"title":"The Wilderness Season","chapter_number":1,"intent":"Help the reader see their current hardship as preparation, not punishment.","key_points":["God uses wilderness seasons to prepare leaders","Isolation is not abandonment"],"anchor_scriptures":["Isaiah 61:1-3"],"testimony_ids":[]}')
 CHAPTER_ID=$(python3 -c "import json,sys;print(json.loads('$CHAPTER')['id'])")
 
-# Generate the chapter (SSE stream — this is the main feature)
+# 7. Generate the chapter (SSE stream — this is the main feature)
 curl -N -s -X POST http://localhost:8000/api/generate/chapter \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d "{\"chapter_id\":\"$CHAPTER_ID\"}"
@@ -350,20 +469,50 @@ You should see a stream of `data: {"text": "..."}` chunks followed by `data: [DO
 voice brief falls back to raw onboarding answers — generation still works, just
 without the extracted signature phrases / cadence score / voice summary layered in.
 
-### Backend test suite
+### 3. UI walkthrough (for the recorded demo)
 
-A `pytest` setup is included as a starting point:
+Once the smoke test confirms the backend works, the recorded demo should walk
+through the same journey in the UI, in this order — it maps directly onto the
+"What it does" list on the landing page and tells a complete story:
+
+1. **Landing page** — orient the reviewer: who this is for, what makes it different.
+2. **Sign up → Onboarding** — go through 2–3 steps quickly, then pause on a step
+   with a `previewTrigger` (e.g. signature phrases or writing samples) and let
+   the **Live Voice Preview** stream on screen. This is the single most
+   memorable moment in the demo — narrate what's happening ("it's drafting in
+   real time, based only on what I've told it so far").
+3. **Dashboard** — show the Voice DNA summary populating (if the worker has run).
+4. **Voice Profile page** — show the full Voice DNA breakdown and the **Voice
+   Evolution Timeline** — explain that this versions like commit history.
+5. **Testimony Vault** — add or show a testimony.
+6. **Manuscript Studio** — create a chapter, show drag-to-reorder.
+7. **Chapter Editor** — the centerpiece:
+   - Click **Generate Chapter Draft in My Voice** and let it stream.
+   - Use **Check My Voice** to show the match score and feedback.
+   - Use **Weave In My Story** to show testimony retrieval in action.
+   - Use **Suggest Scripture Anchor** to show the scripture index.
+   - Briefly show the **Chat** tab.
+8. **Export** — download the `.docx` and show the formatted result.
+
+Keep narration focused on *why* each piece exists (the voice brief, RAG
+retrieval, chapter memory) rather than just *what* it does — that's what
+separates this from "I called an LLM API in a loop."
+
+### 4. Backend unit tests
+
+A `pytest` scaffold covers the two pieces of core logic that don't require a
+live LLM call: the voice brief builder and DOCX export.
 
 ```bash
 cd backend
-pytest
+source venv/bin/activate
+pip install pytest pytest-asyncio   # if not already installed
+pytest -v
 ```
 
-At this stage the test suite is a scaffold (`pytest` + `pytest-asyncio` are in
-`requirements.txt`) — add tests under `backend/tests/` as the build progresses.
-Priority areas to cover before the demo: `build_voice_brief` output structure,
-`retrieve_relevant_context` returning expected chunk counts, and the
-`/api/generate/*` routes with a mocked Anthropic client.
+Expand this suite as time allows — `retrieve_relevant_context` (with a seeded
+test database) and the `/api/generate/*` routes with a mocked LLM client are the
+next highest-value additions.
 
 ---
 
@@ -432,6 +581,11 @@ in `frontend/src/styles/globals.css`.
 - **Embeddings** use `sentence-transformers` (`all-MiniLM-L6-v2`, 384-dim) running
   locally on CPU — fine for demo-scale data, but the first embedding call after a
   cold start will download the model (~90MB).
+- **LLM provider**: the app runs on Anthropic (Claude Sonnet 4) or Groq
+  (Llama 3.3 70B), switchable via `LLM_PROVIDER` in `.env` — see
+  [LLM provider](#llm-provider-anthropic-vs-groq) above. Groq's free tier doesn't
+  return token usage on streamed responses, so cost/latency figures for Groq
+  generations in `generation_logs` are estimates (word-count based), not exact.
 - **DOCX export** produces a clean, publisher-style manuscript but doesn't yet
   handle embedded images or a generated table of contents.
 - **No PDF export** yet — only `.docx`.
