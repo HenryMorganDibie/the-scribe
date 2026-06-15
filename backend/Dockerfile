@@ -36,4 +36,4 @@ EXPOSE 8000
 
 # Default command runs the API. The worker service overrides this via
 # railway.json (startCommand: "dramatiq app.workers.tasks").
-CMD ["sh", "-c", "cd backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "cd backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
