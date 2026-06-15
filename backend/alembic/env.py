@@ -19,7 +19,31 @@ from app.db.session import Base
 import app.models  # noqa: F401 — ensure all models are imported
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.SYNC_DATABASE_URL or settings.DATABASE_URL.replace("asyncpg", "psycopg2"))
+
+# Use a safe lookup for SYNC_DATABASE_URL; fall back to deriving a sync URL
+# from the async URL by replacing the async driver. We set the config's
+# `sqlalchemy.url` differently depending on offline vs online mode so that
+# the async engine is never created with a sync driver (psycopg2).
+sync_url = getattr(settings, "SYNC_DATABASE_URL", "") or ""
+if not sync_url:
+    try:
+        sync_url = settings.DATABASE_URL.replace("asyncpg", "psycopg2")
+    except Exception:
+        sync_url = ""
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+# If running offline, prefer a sync URL for Alembic's SQL generation.
+# If running online, ensure the async URL is used for engine creation.
+if context.is_offline_mode():
+    offline_url = sync_url or config.get_main_option("sqlalchemy.url")
+    if offline_url:
+        config.set_main_option("sqlalchemy.url", offline_url)
+else:
+    async_url = getattr(settings, "DATABASE_URL", "")
+    if async_url:
+        config.set_main_option("sqlalchemy.url", async_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
