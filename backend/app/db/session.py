@@ -1,7 +1,7 @@
 """
 Async database session setup.
 
-connect_args={"statement_cache_size": 0} disables asyncpg's prepared
+connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0} disables asyncpg's prepared
 statement cache. This is required when connecting through a connection
 pooler in transaction-pooling mode (e.g. Supabase's pgbouncer pooler, or
 Railway's pooled Postgres) — prepared statements can't be reused safely
@@ -21,7 +21,7 @@ engine = create_async_engine(
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
-    connect_args={"statement_cache_size": 0},
+    connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
 )
 
 AsyncSessionLocal = async_sessionmaker(

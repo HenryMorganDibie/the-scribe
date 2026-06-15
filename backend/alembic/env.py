@@ -7,7 +7,7 @@ app.core.config.normalize_db_url() already converts any Postgres scheme
 so this file does no URL manipulation of its own — it simply uses the same
 async engine configuration as app/db/session.py.
 
-connect_args={"statement_cache_size": 0} is required for connection poolers
+connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0} is required for connection poolers
 in transaction-pooling mode (Supabase's pgbouncer, Railway pooled Postgres) —
 see app/db/session.py for the full explanation. NullPool is used here (rather
 than the session pool settings) because migrations are a single short-lived
@@ -53,7 +53,7 @@ async def run_migrations_online():
     connectable = create_async_engine(
         settings.async_database_url,
         poolclass=pool.NullPool,
-        connect_args={"statement_cache_size": 0},
+        connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
