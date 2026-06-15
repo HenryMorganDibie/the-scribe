@@ -41,7 +41,12 @@ if context.is_offline_mode():
     if offline_url:
         config.set_main_option("sqlalchemy.url", offline_url)
 else:
-    async_url = getattr(settings, "DATABASE_URL", "")
+    async_url = getattr(settings, "DATABASE_URL", "") or ""
+    # Normalize to an asyncpg URL if the deployment provided a sync URL
+    if async_url and "asyncpg" not in async_url:
+        async_url = async_url.replace("+psycopg2", "+asyncpg").replace("psycopg2", "asyncpg")
+        async_url = async_url.replace("postgresql://", "postgresql+asyncpg://").replace("postgres://", "postgres+asyncpg://")
+
     if async_url:
         config.set_main_option("sqlalchemy.url", async_url)
 

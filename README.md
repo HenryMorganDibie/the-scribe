@@ -208,6 +208,12 @@ REDIS_URL=redis://localhost:6379/0
 CORS_ORIGINS=["http://localhost:5173"]
 ```
 
+Note: The `DATABASE_URL` used by the backend must be an async Postgres URL
+(for example `postgresql+asyncpg://...`) when running migrations online. If
+your deployment provides a sync-style URL, set `SYNC_DATABASE_URL` instead
+to a sync driver URL (for offline SQL generation), or ensure `DATABASE_URL`
+is normalized to an async URL in your environment.
+
 A single `DATABASE_URL` is all the database config needed — `app/core/config.py`
 normalizes whatever Postgres scheme it's given (this is what lets the exact same
 `.env` structure work against Railway's or Supabase's connection strings later,
