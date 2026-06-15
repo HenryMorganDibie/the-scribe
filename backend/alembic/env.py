@@ -15,15 +15,21 @@ connection, not a long-running pool.
 """
 import asyncio
 from logging.config import fileConfig
+<<<<<<< HEAD
 
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
+=======
+from sqlalchemy import pool, engine_from_config as sync_engine_from_config
+from sqlalchemy.ext.asyncio import async_engine_from_config
+>>>>>>> ea980c7 (alembic: prefer sync psycopg2 when SYNC_DATABASE_URL set)
 from alembic import context
 
 from app.core.config import settings
 from app.db.session import Base
 import app.models  # noqa: F401 — ensure all models are registered on Base.metadata
 
+import os
 config = context.config
 
 if config.config_file_name is not None:
@@ -50,8 +56,53 @@ def do_run_migrations(connection):
 
 
 async def run_migrations_online():
+<<<<<<< HEAD
     connectable = create_async_engine(
         settings.async_database_url,
+=======
+    # If a synchronous URL is available (e.g. SYNC_DATABASE_URL set), prefer
+    # running migrations over a direct sync psycopg2 connection. This avoids
+    # issues with asyncpg prepared-statement caching when a pooler like
+    # pgbouncer is in front of Postgres.
+    if sync_url:
+        config.set_main_option("sqlalchemy.url", sync_url)
+    # Prefer a synchronous connection for running migrations when possible.
+    # Use explicit SYNC_DATABASE_URL env var if set, otherwise attempt to
+    # derive a psycopg2-compatible sync URL from the configured DATABASE_URL.
+    sync_url = os.environ.get("SYNC_DATABASE_URL")
+    if not sync_url:
+        raw = getattr(settings, "DATABASE_URL", "") or ""
+        if raw:
+            if "+asyncpg" in raw:
+                sync_url = raw.replace("+asyncpg", "")
+            else:
+                # replace legacy postgres:// with postgresql:// for psycopg2
+                sync_url = raw.replace("postgres://", "postgresql://")
+
+    if sync_url:
+        config.set_main_option("sqlalchemy.url", sync_url)
+        connectable = sync_engine_from_config(
+            config.get_section(config.config_ini_section),
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+        )
+        with connectable.connect() as connection:
+            do_run_migrations(connection)
+        return
+
+        connectable = sync_engine_from_config(
+            config.get_section(config.config_ini_section),
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+        )
+        with connectable.connect() as connection:
+            do_run_migrations(connection)
+        return
+
+    connectable = async_engine_from_config(
+        config.get_section(config.config_ini_section),
+        prefix="sqlalchemy.",
+>>>>>>> ea980c7 (alembic: prefer sync psycopg2 when SYNC_DATABASE_URL set)
         poolclass=pool.NullPool,
         connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
     )
