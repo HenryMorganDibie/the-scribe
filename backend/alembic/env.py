@@ -7,19 +7,23 @@ app.core.config.normalize_db_url() already converts any Postgres scheme
 so this file does no URL manipulation of its own — it simply uses the same
 async engine configuration as app/db/session.py.
 
-connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0} is
-required for connection poolers
-in transaction-pooling mode (Supabase's pgbouncer, Railway pooled Postgres) —
-see app/db/session.py for the full explanation. NullPool is used here (rather
-than the session pool settings) because migrations are a single short-lived
-connection, not a long-running pool.
+connect_args sets both statement_cache_size=0 (asyncpg's client-side prepared
+statement cache) and prepared_statement_cache_size=0 (SQLAlchemy's asyncpg
+dialect wrapper cache) — both are required to avoid
+asyncpg.exceptions.DuplicatePreparedStatementError against Supabase's
+connection pooler (see app/db/session.py for the full explanation).
+
+NullPool is used here (rather than the session pool settings) because
+migrations are a single short-lived connection, not a long-running pool.
+
+This file intentionally does NOT use psycopg2 or any synchronous driver —
+asyncpg is the only Postgres driver this project depends on.
 """
 import asyncio
-import os
 from logging.config import fileConfig
 
-from sqlalchemy import pool, engine_from_config as sync_engine_from_config
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy import pool
+from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 
 from app.core.config import settings
@@ -52,33 +56,8 @@ def do_run_migrations(connection):
 
 
 async def run_migrations_online():
-    # Prefer a synchronous connection for running migrations when possible.
-    # Use explicit SYNC_DATABASE_URL env var if set, otherwise attempt to
-    # derive a psycopg2-compatible sync URL from the configured DATABASE_URL.
-    sync_url = os.environ.get("SYNC_DATABASE_URL")
-    if not sync_url:
-        raw = getattr(settings, "DATABASE_URL", "") or ""
-        if raw:
-            if "+asyncpg" in raw:
-                sync_url = raw.replace("+asyncpg", "")
-            else:
-                # replace legacy postgres:// with postgresql:// for psycopg2
-                sync_url = raw.replace("postgres://", "postgresql://")
-
-    if sync_url:
-        config.set_main_option("sqlalchemy.url", sync_url)
-        connectable = sync_engine_from_config(
-            config.get_section(config.config_ini_section),
-            prefix="sqlalchemy.",
-            poolclass=pool.NullPool,
-        )
-        with connectable.connect() as connection:
-            do_run_migrations(connection)
-        return
-
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section),
-        prefix="sqlalchemy.",
+    connectable = create_async_engine(
+        settings.async_database_url,
         poolclass=pool.NullPool,
         connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
     )
