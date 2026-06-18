@@ -34,6 +34,16 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 
 EXPOSE 8000
 
-# Default command runs the API. The worker service overrides this via
-# railway.json (startCommand: "dramatiq app.workers.tasks").
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "${PORT:-8000}"]
+# Default command runs the full production startup: migrate, seed, serve.
+# Written in shell form (not exec-form array) so that:
+#   1. $PORT is properly expanded by the shell at container runtime (Railway
+#      injects this dynamically -- exec-form CMD ["..."] arrays do NOT invoke
+#      a shell, so "${PORT:-8000}" inside a JSON array is passed to uvicorn
+#      as a literal, unexpanded string, and uvicorn fails to parse it as a
+#      port and exits immediately).
+#   2. The migrate -> seed -> serve sequence runs as one chained command.
+# This mirrors railway.json's startCommand exactly, so the correct command
+# runs whether Railway reads railway.json or falls back to this Dockerfile's
+# CMD. The worker service overrides this entirely via its own start command
+# (dramatiq app.workers.tasks) set in the Railway dashboard.
+CMD alembic upgrade head && python scripts/seed_scriptures.py && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
