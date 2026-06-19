@@ -14,7 +14,7 @@ import structlog
 
 from app.core.config import settings
 from app.db.session import engine
-from app.api.routes import auth, onboarding, projects, voice, generate, export
+from app.api.routes import auth, onboarding, projects, voice, generate, export, sermons
 
 logger = structlog.get_logger()
 
@@ -57,6 +57,7 @@ app.include_router(projects.router, prefix="/api")
 app.include_router(voice.router, prefix="/api")
 app.include_router(generate.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
+app.include_router(sermons.router, prefix="/api")
 
 
 @app.get("/api/health")
