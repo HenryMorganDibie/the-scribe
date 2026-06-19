@@ -61,7 +61,8 @@ def merge_voice_dna(profile, new_dna: dict) -> dict:
     # Cadence — average with new if present
     new_cadence = new_dna.get("cadence_score")
     if isinstance(new_cadence, (int, float)):
-        profile.cadence_score = round(((profile.cadence_score or new_cadence) + new_cadence) / 2, 3)
+        existing = profile.cadence_score if profile.cadence_score is not None else new_cadence
+        profile.cadence_score = round((existing + new_cadence) / 2, 3)
 
     # Voice summary — replace with the freshly generated one if present
     if new_dna.get("voice_summary"):
