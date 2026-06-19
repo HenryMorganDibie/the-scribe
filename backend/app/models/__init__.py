@@ -68,6 +68,7 @@ class VoiceProfile(Base):
     cadence_score: Mapped[Optional[float]] = mapped_column(Float)  # 0.0 (punchy) → 1.0 (flowing)
     style_tags: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
     voice_summary: Mapped[Optional[str]] = mapped_column(Text)  # The "ghost brief" — 300-word description
+    dna_narrative: Mapped[Optional[str]] = mapped_column(Text)  # cached Ministry DNA Report narrative
 
     # Writing samples (raw text — embeddings stored separately)
     writing_samples: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text))
@@ -152,6 +153,10 @@ class Testimony(Base):
     story: Mapped[str] = mapped_column(Text, nullable=False)
     themes: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
     used_in_chapters: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))  # chapter IDs
+
+    status: Mapped[str] = mapped_column(String, default="approved")  # suggested|approved
+    source: Mapped[str] = mapped_column(String, default="manual")    # manual|mined
+    source_sermon_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("sermons.id", ondelete="SET NULL"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -269,3 +274,31 @@ class GenerationLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="generation_logs")
+
+
+# ─────────────────────────────────────────────
+# SERMONS (ingested sources)
+# ─────────────────────────────────────────────
+class Sermon(Base):
+    __tablename__ = "sermons"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"))
+
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    source_type: Mapped[str] = mapped_column(String)  # pdf|docx|text|audio
+    original_filename: Mapped[Optional[str]] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="pending")  # pending|extracting|analyzing|complete|failed
+
+    transcript: Mapped[Optional[str]] = mapped_column(Text)
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+    phrases_added: Mapped[int] = mapped_column(Integer, default=0)
+    testimonies_suggested: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    __table_args__ = (
+        Index("ix_sermons_user_status", "user_id", "status"),
+    )
