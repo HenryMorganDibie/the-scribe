@@ -38,3 +38,13 @@ def test_merge_voice_dna_is_additive():
     assert profile.cadence_score == 0.5  # average of 0.4 and 0.6
     assert profile.voice_summary == "New summary."
     assert result == {"phrases_added": 1, "scriptures_added": 1}
+
+
+def test_merge_voice_dna_cadence_zero_baseline():
+    profile = VoiceProfile(user_id="u1", cadence_score=0.0)
+    merge_voice_dna(profile, {"cadence_score": 0.6})
+    assert profile.cadence_score == 0.3  # average of 0.0 and 0.6, not 0.6
+
+
+def test_parse_dna_json_non_dict_returns_empty():
+    assert _parse_dna_json("[1, 2, 3]") == {}
