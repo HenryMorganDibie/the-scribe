@@ -9,6 +9,7 @@ interface Testimony {
   story: string
   themes: string[]
   created_at: string
+  status: string
 }
 
 export default function Testimonies() {
@@ -18,9 +19,30 @@ export default function Testimonies() {
   const [title, setTitle] = useState('')
   const [story, setStory] = useState('')
   const [themesInput, setThemesInput] = useState('')
+  const [suggestions, setSuggestions] = useState<Testimony[]>([])
 
   const load = () => {
-    api.get('/testimonies').then((r) => setTestimonies(r.data)).finally(() => setLoading(false))
+    api.get('/testimonies', { params: { status: 'approved' } }).then((r) => setTestimonies(r.data)).finally(() => setLoading(false))
+    api.get('/testimonies', { params: { status: 'suggested' } }).then((r) => setSuggestions(r.data))
+  }
+
+  const approveSuggestion = async (id: string) => {
+    try {
+      await api.post(`/testimonies/${id}/approve`)
+      toast.success('Added to your vault')
+      load()
+    } catch {
+      toast.error('Failed to approve')
+    }
+  }
+
+  const dismissSuggestion = async (id: string) => {
+    try {
+      await api.delete(`/testimonies/${id}`)
+      setSuggestions((prev) => prev.filter((t) => t.id !== id))
+    } catch {
+      toast.error('Failed to dismiss')
+    }
   }
 
   useEffect(load, [])
@@ -105,6 +127,24 @@ export default function Testimonies() {
           </div>
           <button type="submit" className="btn-primary">Save to Vault</button>
         </form>
+      )}
+
+      {suggestions.length > 0 && (
+        <div className="mb-8">
+          <h2 className="font-display text-lg font-semibold mb-3">Suggested from your sermons</h2>
+          <div className="space-y-3">
+            {suggestions.map((t) => (
+              <div key={t.id} className="card p-5 border-l-4 border-seal">
+                <h3 className="font-display font-semibold mb-1">{t.title}</h3>
+                <p className="text-study-400 text-sm leading-relaxed line-clamp-3 mb-3">{t.story}</p>
+                <div className="flex gap-2">
+                  <button onClick={() => approveSuggestion(t.id)} className="btn-primary text-sm px-3 py-1.5">Approve</button>
+                  <button onClick={() => dismissSuggestion(t.id)} className="text-sm px-3 py-1.5 text-study-400 hover:text-red-400">Dismiss</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {loading ? (
