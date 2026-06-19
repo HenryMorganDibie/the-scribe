@@ -13,6 +13,7 @@ import Projects from '@/pages/Projects'
 import ManuscriptStudio from '@/pages/ManuscriptStudio'
 import ChapterEditor from '@/pages/ChapterEditor'
 import Testimonies from '@/pages/Testimonies'
+import Sermons from '@/pages/Sermons'
 import AppLayout from '@/components/layout/AppLayout'
 
 function ProtectedRoute({ children, requireOnboarded = true }: { children: JSX.Element; requireOnboarded?: boolean }) {
@@ -72,6 +73,7 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/voice-profile" element={<VoiceProfile />} />
           <Route path="/testimonies" element={<Testimonies />} />
+          <Route path="/sermons" element={<Sermons />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:id" element={<ManuscriptStudio />} />
           <Route path="/projects/:id/chapters/:chapterId" element={<ChapterEditor />} />
