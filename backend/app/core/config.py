@@ -128,10 +128,16 @@ class Settings(BaseSettings):
 
         if problems:
             for p in problems:
-                print(f"[config error] {p}", file=sys.stderr)
+                print(f"[CONFIG ERROR] {p}", file=sys.stderr)
+                print(f"[CONFIG ERROR] {p}", file=sys.stdout)  # also stdout — some log
+                # collectors (Railway included) separate streams differently;
+                # printing to both guarantees this is visible regardless of
+                # which stream a platform surfaces by default.
             if self.ENVIRONMENT == "production":
+                joined = " | ".join(problems)
+                print(f"[CONFIG ERROR] Refusing to start: {joined}", file=sys.stdout)
                 raise RuntimeError(
-                    "Invalid configuration for production startup: " + " | ".join(problems)
+                    "Invalid configuration for production startup: " + joined
                 )
 
     class Config:
