@@ -7,6 +7,7 @@ const navItems = [
   { to: '/projects', label: 'Manuscripts' },
   { to: '/voice-profile', label: 'Voice' },
   { to: '/testimonies', label: 'Testimonies' },
+  { to: '/sermons', label: 'Sermons' },
 ]
 
 export default function AppLayout() {
