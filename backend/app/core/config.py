@@ -72,7 +72,7 @@ class Settings(BaseSettings):
 
     # ── Background jobs / embeddings ────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # ── App ───────────────────────────────────────────────────────
     ENVIRONMENT: str = "development"
