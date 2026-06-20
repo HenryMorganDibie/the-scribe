@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -144,7 +144,7 @@ async def list_testimonies(
 
 
 @router.post("/testimonies", status_code=201)
-async def create_testimony(body: TestimonyCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def create_testimony(body: TestimonyCreate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     t = Testimony(user_id=current_user.id, **body.model_dump())
     db.add(t)
     await db.commit()
@@ -152,13 +152,13 @@ async def create_testimony(body: TestimonyCreate, current_user: User = Depends(g
 
     # Index for vector retrieval — non-blocking, see app.utils.jobs
     from app.workers.tasks import index_testimony_task
-    fire_background_job(index_testimony_task, current_user.id, t.id, t.story, job_name="index_testimony")
+    fire_background_job(background_tasks, index_testimony_task, current_user.id, t.id, t.story, job_name="index_testimony")
 
     return {"id": t.id, "title": t.title}
 
 
 @router.post("/testimonies/{testimony_id}/approve")
-async def approve_testimony(testimony_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def approve_testimony(testimony_id: str, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Testimony).where(Testimony.id == testimony_id, Testimony.user_id == current_user.id))
     t = result.scalar_one_or_none()
     if not t:
@@ -167,7 +167,7 @@ async def approve_testimony(testimony_id: str, current_user: User = Depends(get_
     await db.commit()
     # Index for retrieval now that it's part of the vault
     from app.workers.tasks import index_testimony_task
-    fire_background_job(index_testimony_task, current_user.id, t.id, t.story, job_name="index_testimony")
+    fire_background_job(background_tasks, index_testimony_task, current_user.id, t.id, t.story, job_name="index_testimony")
     return {"approved": True, "id": t.id}
 
 

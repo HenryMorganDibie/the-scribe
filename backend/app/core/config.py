@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
 
     # ── Background jobs / embeddings ────────────────────────────
+    # Unused — kept only so old .env files with this key don't error on load.
+    # Background work runs in-process via FastAPI BackgroundTasks (see
+    # app/workers/tasks.py); there is no broker/worker to point at Redis for.
     REDIS_URL: str = "redis://localhost:6379/0"
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
 

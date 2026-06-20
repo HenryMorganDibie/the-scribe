@@ -1,37 +1,42 @@
 """
-Shared utilities for dispatching Dramatiq background jobs from API routes.
+Shared helper for scheduling in-process background work from API routes.
 
-Background jobs (voice DNA extraction, embedding indexing, chapter summaries)
-are non-blocking: if Redis/Dramatiq isn't running, the API request still
-succeeds — the job is simply never enqueued. This is intentional for local
-development without Redis, but failures are logged (not silently swallowed)
-so they're visible in production.
+Background tasks (voice DNA extraction, embedding indexing, chapter
+summaries) run via FastAPI's BackgroundTasks: scheduled during the request,
+executed in the same process after the response has been sent. There is no
+external broker (Redis) or worker process — see app/workers/tasks.py for the
+full rationale.
+
+fire_background_job wraps BackgroundTasks.add_task purely for consistent
+logging at the call sites (so every background dispatch logs the same way,
+and a bad call here can't take down the request that scheduled it).
 """
-from typing import Any, Callable
+from typing import Any, Callable, Coroutine
 import structlog
+
+from fastapi import BackgroundTasks
 
 logger = structlog.get_logger()
 
 
-def fire_background_job(actor: Callable, *args: Any, job_name: str | None = None, **kwargs: Any) -> bool:
+def fire_background_job(
+    background_tasks: BackgroundTasks,
+    task: Callable[..., Coroutine],
+    *args: Any,
+    job_name: str | None = None,
+    **kwargs: Any,
+) -> bool:
     """
-    Enqueue a Dramatiq actor without letting a broker failure break the
-    calling request.
-
-    Returns True if the job was enqueued, False if it failed (logged either way).
+    Schedule an async task to run after the current request's response is
+    sent. Returns True if scheduling succeeded, False otherwise (logged
+    either way; scheduling failures do not raise, so the calling request
+    still succeeds).
     """
-    name = job_name or getattr(actor, "actor_name", str(actor))
+    name = job_name or getattr(task, "__name__", str(task))
     try:
-        actor.send(*args, **kwargs)
-        logger.debug("background_job_enqueued", job=name)
+        background_tasks.add_task(task, *args, **kwargs)
+        logger.debug("background_job_scheduled", job=name)
         return True
     except Exception as e:
-        logger.warning(
-            "background_job_enqueue_failed",
-            job=name,
-            error=str(e),
-            hint="Is Redis running and DRAMATIQ broker reachable? "
-                 "The request still succeeded — this job will not run until "
-                 "it is retried or the worker comes back online.",
-        )
+        logger.warning("background_job_schedule_failed", job=name, error=str(e))
         return False

@@ -1,33 +1,50 @@
 """
-Dramatiq background workers for long-running tasks:
-- Voice DNA extraction (after onboarding)
-- Writing sample indexing (embedding ingestion)
-- Chapter summary generation
-- Voice version snapshots
+In-process background tasks for FastAPI's BackgroundTasks.
+
+These run as plain async functions, scheduled via BackgroundTasks.add_task()
+from the request that triggers them (see app/api/routes/onboarding.py,
+projects.py, voice.py). They execute in the same process, after the response
+has been sent — there is no separate worker process and no message broker.
+
+Why not Dramatiq/Redis: this app deploys on a single web service (Render
+free/starter tier) with no Redis instance and no worker process configured.
+Dramatiq actors with no running worker silently never execute — which is
+exactly what was happening here: voice DNA extraction, writing-sample
+indexing, and chapter summaries were enqueued but never processed for any
+production signup, because nothing was ever connected to consume the queue.
+
+This mirrors app/services/ingestion/pipeline.py's process_sermon, which
+already uses this exact pattern successfully (see app/api/routes/sermons.py).
+
+Scaling note: in-process background tasks run on the same request-handling
+process, sharing its CPU/memory. For a few thousand concurrent users this is
+fine -- each task is a handful of LLM calls + embedding/DB writes (seconds,
+not minutes), and Render can scale the web service horizontally (more
+instances) if needed. If sustained background-task volume ever becomes large
+enough to starve request handling, the next step is a dedicated worker
+service + queue (Redis/Dramatiq, or Render's own background worker service
+type) -- not a route-level concern, so call sites do not need to change when
+that day comes.
 """
-import dramatiq
-from dramatiq.brokers.redis import RedisBroker
+from sqlalchemy import select
 
-from app.core.config import settings
+from app.db.session import AsyncSessionLocal
+from app.models import VoiceProfile, Chapter
+from app.services.ai.generation import extract_voice_dna, generate_chapter_summary
+from app.services.voice.embeddings import index_writing_sample, index_testimony
+from app.services.voice.timeline import snapshot_voice
 
-broker = RedisBroker(url=settings.REDIS_URL)
-dramatiq.set_broker(broker)
+import structlog
+
+logger = structlog.get_logger()
 
 
-@dramatiq.actor(queue_name="voice_extraction", max_retries=3)
-def extract_voice_dna_task(user_id: str):
+async def extract_voice_dna_task(user_id: str) -> None:
     """
     Extract voice DNA from writing samples after onboarding.
-    Runs in background — can take 10-30s depending on sample size.
+    Typically 5-20s depending on sample size and LLM provider.
     """
-    import asyncio
-    from app.db.session import AsyncSessionLocal
-    from app.models import VoiceProfile
-    from app.services.ai.generation import extract_voice_dna
-    from app.services.voice.timeline import snapshot_voice
-    from sqlalchemy import select
-
-    async def _run():
+    try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(VoiceProfile).where(VoiceProfile.user_id == user_id)
@@ -43,7 +60,7 @@ def extract_voice_dna_task(user_id: str):
                 profile.style_tags = dna.get("style_tags", [])
                 profile.voice_summary = dna.get("voice_summary", "")
 
-                # Merge anchor scriptures
+                # Merge anchor scriptures (additive — never drop existing ones)
                 existing = {s["ref"]: s for s in (profile.anchor_scriptures or [])}
                 for s in dna.get("anchor_scriptures", []):
                     if s["ref"] not in existing:
@@ -52,27 +69,19 @@ def extract_voice_dna_task(user_id: str):
 
                 await db.commit()
 
-                # Snapshot voice version
                 await snapshot_voice(
                     profile=profile,
                     trigger="onboarding_complete",
                     db=db,
                     change_summary="Initial voice DNA extracted from writing samples.",
                 )
+    except Exception:
+        logger.exception("extract_voice_dna_task_failed", user_id=user_id)
 
-    asyncio.run(_run())
 
-
-@dramatiq.actor(queue_name="embeddings", max_retries=3)
-def index_writing_samples_task(user_id: str):
+async def index_writing_samples_task(user_id: str) -> None:
     """Index all writing samples for a user into pgvector."""
-    import asyncio
-    from app.db.session import AsyncSessionLocal
-    from app.models import VoiceProfile
-    from app.services.voice.embeddings import index_writing_sample
-    from sqlalchemy import select
-
-    async def _run():
+    try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(VoiceProfile).where(VoiceProfile.user_id == user_id)
@@ -83,34 +92,22 @@ def index_writing_samples_task(user_id: str):
 
             for sample in profile.writing_samples:
                 await index_writing_sample(user_id, sample, db)
+    except Exception:
+        logger.exception("index_writing_samples_task_failed", user_id=user_id)
 
-    asyncio.run(_run())
 
-
-@dramatiq.actor(queue_name="embeddings", max_retries=3)
-def index_testimony_task(user_id: str, testimony_id: str, story: str):
+async def index_testimony_task(user_id: str, testimony_id: str, story: str) -> None:
     """Index a single testimony into pgvector for retrieval."""
-    import asyncio
-    from app.db.session import AsyncSessionLocal
-    from app.services.voice.embeddings import index_testimony
-
-    async def _run():
+    try:
         async with AsyncSessionLocal() as db:
             await index_testimony(user_id, testimony_id, story, db)
+    except Exception:
+        logger.exception("index_testimony_task_failed", user_id=user_id, testimony_id=testimony_id)
 
-    asyncio.run(_run())
 
-
-@dramatiq.actor(queue_name="chapter_ops", max_retries=2)
-def generate_chapter_summary_task(chapter_id: str):
+async def generate_chapter_summary_task(chapter_id: str) -> None:
     """Generate and store a chapter summary after content is saved."""
-    import asyncio
-    from app.db.session import AsyncSessionLocal
-    from app.models import Chapter
-    from app.services.ai.generation import generate_chapter_summary
-    from sqlalchemy import select
-
-    async def _run():
+    try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
             chapter = result.scalar_one_or_none()
@@ -120,5 +117,5 @@ def generate_chapter_summary_task(chapter_id: str):
             summary = await generate_chapter_summary(chapter.content, chapter.title)
             chapter.summary = summary
             await db.commit()
-
-    asyncio.run(_run())
+    except Exception:
+        logger.exception("generate_chapter_summary_task_failed", chapter_id=chapter_id)
