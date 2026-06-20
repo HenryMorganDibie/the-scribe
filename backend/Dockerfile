@@ -28,9 +28,9 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-# Pre-download the embedding model at build time so the first request/job
-# doesn't pay the ~90MB download cost in production.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Pre-download the embedding model (ONNX) at build time so the first request/job
+# doesn't pay the download cost in production.
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2')"
 
 EXPOSE 8000
 

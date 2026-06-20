@@ -14,7 +14,7 @@ import structlog
 
 from app.core.config import settings
 from app.db.session import engine
-from app.api.routes import auth, onboarding, projects, voice, generate, export
+from app.api.routes import auth, onboarding, projects, voice, generate, export, sermons
 
 logger = structlog.get_logger()
 
@@ -51,9 +51,13 @@ app = FastAPI(
 )
 
 # CORS
+# allow_origins handles the explicit list (e.g. localhost in dev); allow_origin_regex
+# matches the project's Vercel deploys (production + the auto-generated branch/preview
+# URLs) so we don't have to hard-code every changing preview domain.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,6 +70,7 @@ app.include_router(projects.router, prefix="/api")
 app.include_router(voice.router, prefix="/api")
 app.include_router(generate.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
+app.include_router(sermons.router, prefix="/api")
 
 
 @app.get("/api/health")
