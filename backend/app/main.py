@@ -21,7 +21,16 @@ logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Plain print (not structlog) so this line is guaranteed to appear even
+    # if structlog's own configuration is somehow the thing that's broken --
+    # this is the very first line of app code that runs, before any
+    # validation. If this line never appears in deploy logs, the process
+    # didn't even reach Python startup (a Dockerfile/start-command issue).
+    # If this line appears but nothing after it does, validate_for_startup()
+    # raised -- check CONFIG ERROR lines immediately below it.
+    print("[STARTUP] Entering FastAPI lifespan -- about to validate config...", flush=True)
     settings.validate_for_startup()
+    print("[STARTUP] Config validated OK.", flush=True)
     logger.info(
         "the_scribe_api_starting",
         environment=settings.ENVIRONMENT,
