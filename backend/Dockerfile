@@ -34,18 +34,16 @@ RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='se
 
 EXPOSE 8000
 
-# Default command runs the API.
-#
-# The build context is the `backend/` directory (Render: dockerContext=backend
-# in render.yaml; Railway: set the service root to backend/), so everything in
-# backend/ is copied to /app and the import path is `app.main` — NOT
-# `backend.app.main`.
-#
-# Shell form (sh -c) is required so ${PORT} — injected by Render/Railway — is
-# expanded by the shell. In exec form (a JSON array) it would be passed to
-# uvicorn as the literal string "${PORT:-8000}" and fail to bind.
-#
-# Database migrations and scripture seeding run as a separate pre-deploy step
-# (see render.yaml `preDeployCommand`), not here — so the web process only ever
-# runs uvicorn and stays alive for the health check.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Default command runs the full production startup: migrate, seed, serve.
+# Written in shell form (not exec-form array) so that:
+#   1. $PORT is properly expanded by the shell at container runtime (Railway
+#      injects this dynamically -- exec-form CMD ["..."] arrays do NOT invoke
+#      a shell, so "${PORT:-8000}" inside a JSON array is passed to uvicorn
+#      as a literal, unexpanded string, and uvicorn fails to parse it as a
+#      port and exits immediately).
+#   2. The migrate -> seed -> serve sequence runs as one chained command.
+# This mirrors railway.json's startCommand exactly, so the correct command
+# runs whether Railway reads railway.json or falls back to this Dockerfile's
+# CMD. The worker service overrides this entirely via its own start command
+# (dramatiq app.workers.tasks) set in the Railway dashboard.
+CMD alembic upgrade head && python scripts/seed_scriptures.py && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
