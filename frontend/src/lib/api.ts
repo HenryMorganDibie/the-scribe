@@ -1,6 +1,10 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+// Resolution order: explicit VITE_API_URL (set in Vercel/Render) wins; otherwise
+// production builds default to the deployed backend and dev builds use localhost.
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? 'https://the-scribe.onrender.com/api' : 'http://localhost:8000/api')
 
 export const api = axios.create({ baseURL: API_URL })
 
