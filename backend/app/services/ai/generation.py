@@ -14,6 +14,7 @@ from sqlalchemy import select, text
 from app.models import VoiceProfile, DocumentEmbedding, Testimony, Scripture, Chapter
 from app.services.voice.embeddings import EmbeddingService
 from app.services.ai.llm_client import get_llm_client, estimate_cost
+from app.services.ai.json_utils import strip_json_fences
 
 import structlog
 
@@ -333,9 +334,7 @@ Return ONLY valid JSON. No markdown, no explanation."""
     import json
     raw = result.text.strip()
     try:
-        text = raw
-        if text.startswith("```"):
-            text = text.strip("`").lstrip("json").strip()
+        text = strip_json_fences(raw)
         return json.loads(text)
     except Exception as e:
         logger.warning(

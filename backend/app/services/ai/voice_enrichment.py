@@ -1,12 +1,11 @@
 """Extract voice DNA from arbitrary text and additively merge it into a VoiceProfile."""
 import json
 from app.services.ai.llm_client import get_llm_client
+from app.services.ai.json_utils import strip_json_fences
 
 
 def _parse_dna_json(raw: str) -> dict:
-    text = (raw or "").strip()
-    if text.startswith("```"):
-        text = text.strip("`").lstrip("json").strip()
+    text = strip_json_fences(raw)
     try:
         out = json.loads(text)
         return out if isinstance(out, dict) else {}

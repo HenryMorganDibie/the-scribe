@@ -1,7 +1,7 @@
 """In-process sermon ingestion pipeline (runs as a FastAPI BackgroundTask, no Redis)."""
 from datetime import datetime
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db.session import AsyncSessionLocal
 from app.models import Sermon, VoiceProfile, Testimony, DocumentEmbedding
@@ -31,6 +31,8 @@ async def process_sermon(sermon_id: str, source_type: str, file_bytes: bytes | N
                 transcript = await transcribe_audio(file_bytes or b"", filename or "audio.mp3")
             else:
                 transcript = extract_text(source_type, file_bytes=file_bytes, text_value=text_value)
+            if not transcript or not transcript.strip():
+                raise ValueError("No readable text could be extracted or transcribed from this sermon.")
             sermon.transcript = transcript
             sermon.word_count = len(transcript.split())
             sermon.status = "analyzing"
@@ -75,7 +77,14 @@ async def process_sermon(sermon_id: str, source_type: str, file_bytes: bytes | N
             await db.commit()
         except Exception as e:
             logger.error("sermon_ingestion_failed", sermon_id=sermon_id, error=str(e))
-            await db.rollback()
-            sermon.status = "failed"
-            sermon.error_message = str(e)
-            await db.commit()
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            async with AsyncSessionLocal() as db2:
+                await db2.execute(
+                    update(Sermon)
+                    .where(Sermon.id == sermon_id)
+                    .values(status="failed", error_message=str(e)[:2000])
+                )
+                await db2.commit()
