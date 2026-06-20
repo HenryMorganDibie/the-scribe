@@ -1,40 +1,67 @@
 """
-Embedding service using sentence-transformers (all-MiniLM-L6-v2).
+Embedding service using fastembed (ONNX) with all-MiniLM-L6-v2 (384-dim).
 Handles encoding writing samples and testimonies into pgvector-compatible vectors.
+
+fastembed runs the same model as sentence-transformers but via ONNX Runtime
+instead of PyTorch, keeping memory and image size small enough for constrained
+hosts (e.g. a 512 MB instance). Output vectors are L2-normalized — matching the
+previous `normalize_embeddings=True` behavior and the same 384 dimensions — so
+existing stored vectors and the pgvector schema are unchanged.
 """
 import asyncio
 from typing import List
-from functools import lru_cache
 
 from app.core.config import settings
 
 
+# Process-wide singleton — the model is loaded once and shared by every
+# EmbeddingService instance (the app constructs several), so we never hold more
+# than one copy of the model in memory.
+_model = None
+
+
+def _load_model():
+    global _model
+    if _model is None:
+        from fastembed import TextEmbedding
+        name = settings.EMBEDDING_MODEL
+        if "/" not in name:
+            # fastembed expects the fully-qualified Hugging Face id
+            name = f"sentence-transformers/{name}"
+        _model = TextEmbedding(model_name=name)
+    return _model
+
+
+def _embed_texts(texts: List[str]) -> List[List[float]]:
+    """Synchronous fastembed call (run in a thread executor). Returns L2-normalized vectors."""
+    import numpy as np
+
+    model = _load_model()
+    vectors = []
+    for vec in model.embed(list(texts)):
+        arr = np.asarray(vec, dtype=float)
+        norm = np.linalg.norm(arr)
+        if norm > 0:
+            arr = arr / norm
+        vectors.append(arr.tolist())
+    return vectors
+
+
 class EmbeddingService:
-    _model = None
+    """Encodes text into pgvector-compatible 384-dim vectors via fastembed (ONNX)."""
 
     def _get_model(self):
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(settings.EMBEDDING_MODEL)
-        return self._model
+        return _load_model()
 
     async def embed(self, text: str) -> List[float]:
         """Embed a single text string."""
-        loop = asyncio.get_event_loop()
-        model = self._get_model()
-        result = await loop.run_in_executor(
-            None, lambda: model.encode(text, normalize_embeddings=True).tolist()
-        )
-        return result
+        result = await self.embed_batch([text])
+        return result[0]
 
     async def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Embed multiple texts in one pass."""
+        """Embed multiple texts in one pass, off the event loop."""
         loop = asyncio.get_event_loop()
-        model = self._get_model()
-        result = await loop.run_in_executor(
-            None, lambda: model.encode(texts, normalize_embeddings=True).tolist()
-        )
-        return result
+        return await loop.run_in_executor(None, _embed_texts, texts)
 
     def chunk_text(self, text: str, chunk_size: int = 400, overlap: int = 50) -> List[str]:
         """Split text into overlapping chunks for embedding."""

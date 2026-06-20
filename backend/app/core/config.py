@@ -72,11 +72,15 @@ class Settings(BaseSettings):
 
     # ── Background jobs / embeddings ────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # ── App ───────────────────────────────────────────────────────
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: str = '["http://localhost:5173"]'
+    # Regex of additional allowed origins. Defaults to this project's Vercel
+    # deploys (production + branch/preview URLs like
+    # the-scribe-git-<branch>-<team>.vercel.app). Set to "" to disable.
+    CORS_ORIGIN_REGEX: str = r"https://the-scribe.*\.vercel\.app"
     PORT: int = 8000
 
     @field_validator("CORS_ORIGINS")

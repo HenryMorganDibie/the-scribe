@@ -57,6 +57,32 @@ async def update_voice_profile(
     return {"updated": True}
 
 
+@router.get("/voice/dna-report")
+async def dna_report(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.models import Sermon
+    from app.services.ai.dna_report import compute_dna_metrics, generate_dna_narrative
+
+    profile = (await db.execute(select(VoiceProfile).where(VoiceProfile.user_id == current_user.id))).scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Voice profile not found")
+
+    sermons = (await db.execute(
+        select(Sermon).where(Sermon.user_id == current_user.id, Sermon.status == "complete")
+    )).scalars().all()
+    versions = await get_timeline(current_user.id, db)
+
+    metrics = compute_dna_metrics(profile, sermons, versions)
+
+    if not profile.dna_narrative:
+        narrative = await generate_dna_narrative(metrics)
+        profile.dna_narrative = narrative
+        await db.commit()
+    else:
+        narrative = profile.dna_narrative
+
+    return {"metrics": metrics, "narrative": narrative, "sermon_count": len(sermons)}
+
+
 # ── Voice Evolution Timeline ──────────────────
 
 @router.get("/voice-profile/timeline")
@@ -104,8 +130,16 @@ class TestimonyUpdate(BaseModel):
 
 
 @router.get("/testimonies")
-async def list_testimonies(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Testimony).where(Testimony.user_id == current_user.id).order_by(Testimony.created_at.desc()))
+async def list_testimonies(
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Testimony).where(Testimony.user_id == current_user.id)
+    if status:
+        query = query.where(Testimony.status == status)
+    query = query.order_by(Testimony.created_at.desc())
+    result = await db.execute(query)
     return result.scalars().all()
 
 
@@ -121,6 +155,20 @@ async def create_testimony(body: TestimonyCreate, current_user: User = Depends(g
     fire_background_job(index_testimony_task, current_user.id, t.id, t.story, job_name="index_testimony")
 
     return {"id": t.id, "title": t.title}
+
+
+@router.post("/testimonies/{testimony_id}/approve")
+async def approve_testimony(testimony_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Testimony).where(Testimony.id == testimony_id, Testimony.user_id == current_user.id))
+    t = result.scalar_one_or_none()
+    if not t:
+        raise HTTPException(status_code=404, detail="Testimony not found")
+    t.status = "approved"
+    await db.commit()
+    # Index for retrieval now that it's part of the vault
+    from app.workers.tasks import index_testimony_task
+    fire_background_job(index_testimony_task, current_user.id, t.id, t.story, job_name="index_testimony")
+    return {"approved": True, "id": t.id}
 
 
 @router.put("/testimonies/{testimony_id}")
