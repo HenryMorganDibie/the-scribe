@@ -42,9 +42,13 @@ app = FastAPI(
 )
 
 # CORS
+# allow_origins handles the explicit list (e.g. localhost in dev); allow_origin_regex
+# matches the project's Vercel deploys (production + the auto-generated branch/preview
+# URLs) so we don't have to hard-code every changing preview domain.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
