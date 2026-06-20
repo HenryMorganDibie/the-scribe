@@ -34,6 +34,18 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 
 EXPOSE 8000
 
-# Default command runs the API. The worker service overrides this via
-# railway.json (startCommand: "dramatiq app.workers.tasks").
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "${PORT:-8000}"]
+# Default command runs the API.
+#
+# The build context is the `backend/` directory (Render: dockerContext=backend
+# in render.yaml; Railway: set the service root to backend/), so everything in
+# backend/ is copied to /app and the import path is `app.main` — NOT
+# `backend.app.main`.
+#
+# Shell form (sh -c) is required so ${PORT} — injected by Render/Railway — is
+# expanded by the shell. In exec form (a JSON array) it would be passed to
+# uvicorn as the literal string "${PORT:-8000}" and fail to bind.
+#
+# Database migrations and scripture seeding run as a separate pre-deploy step
+# (see render.yaml `preDeployCommand`), not here — so the web process only ever
+# runs uvicorn and stays alive for the health check.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
