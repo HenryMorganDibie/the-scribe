@@ -96,8 +96,7 @@ async def main():
             print(f"  Cadence score: {profile.get('cadence_score')}")
             print(f"  Signature phrases: {profile.get('signature_phrases')}")
         else:
-            print("ℹ Voice DNA not yet processed — start the Dramatiq worker:")
-            print("  dramatiq app.workers.tasks")
+            print("ℹ Voice DNA not yet processed (background task may still be running).")
             print("  (Generation below will still work using raw onboarding data.)")
 
         # 5. Create project

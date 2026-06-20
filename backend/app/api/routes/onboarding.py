@@ -2,7 +2,7 @@
 Onboarding routes — multi-step voice interview.
 Includes: step save, live voice preview (SSE), finalization with background DNA extraction.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -119,6 +119,7 @@ async def voice_preview(
 @router.post("/complete")
 async def complete_onboarding(
     body: OnboardingComplete,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -156,11 +157,12 @@ async def complete_onboarding(
 
     await db.commit()
 
-    # Fire background jobs — non-blocking; see app.utils.jobs for failure handling
+    # Schedule background work — non-blocking; runs after this response is
+    # sent (see app.utils.jobs / app.workers.tasks).
     from app.workers.tasks import extract_voice_dna_task, index_writing_samples_task
 
-    fire_background_job(extract_voice_dna_task, current_user.id, job_name="extract_voice_dna")
+    fire_background_job(background_tasks, extract_voice_dna_task, current_user.id, job_name="extract_voice_dna")
     if profile.writing_samples:
-        fire_background_job(index_writing_samples_task, current_user.id, job_name="index_writing_samples")
+        fire_background_job(background_tasks, index_writing_samples_task, current_user.id, job_name="index_writing_samples")
 
     return {"onboarded": True, "message": "Voice profile is being processed in the background."}

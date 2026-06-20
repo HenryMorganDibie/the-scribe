@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -153,7 +153,7 @@ async def get_chapter(project_id: str, chapter_id: str, current_user: User = Dep
 
 
 @router.put("/projects/{project_id}/chapters/{chapter_id}")
-async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id, Chapter.user_id == current_user.id)
     )
@@ -166,10 +166,10 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
 
     await db.commit()
 
-    # Fire summary generation if content was updated
+    # Schedule summary generation if content was updated — runs after response is sent
     if body.content:
         from app.workers.tasks import generate_chapter_summary_task
-        fire_background_job(generate_chapter_summary_task, chapter_id, job_name="generate_chapter_summary")
+        fire_background_job(background_tasks, generate_chapter_summary_task, chapter_id, job_name="generate_chapter_summary")
 
     return {"updated": True}
 
