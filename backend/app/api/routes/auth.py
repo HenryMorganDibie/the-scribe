@@ -36,6 +36,7 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
         full_name=body.full_name,
     )
     db.add(user)
+    await db.flush()  # assign user.id (column default runs at flush) before linking the profile
 
     # Create empty voice profile
     profile = VoiceProfile(user_id=user.id)

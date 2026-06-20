@@ -32,7 +32,7 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.models.user import User
+    from app.models import User
     from sqlalchemy import select
 
     credentials_exception = HTTPException(
