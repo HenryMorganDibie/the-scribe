@@ -1,12 +1,11 @@
 """Mine personal stories / testimonies from a sermon transcript."""
 import json
 from app.services.ai.llm_client import get_llm_client
+from app.services.ai.json_utils import strip_json_fences
 
 
 def _parse_testimonies(raw: str) -> list[dict]:
-    text = (raw or "").strip()
-    if text.startswith("```"):
-        text = text.strip("`").lstrip("json").strip()
+    text = strip_json_fences(raw)
     try:
         data = json.loads(text)
     except Exception:
