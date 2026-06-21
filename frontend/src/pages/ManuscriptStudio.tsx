@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Plus, GripVertical, FileText, Download, ArrowLeft, X } from 'lucide-react'
+import { Plus, GripVertical, FileText, Download, ArrowLeft, X, MessageCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent,
@@ -153,6 +153,9 @@ export default function ManuscriptStudio() {
           <span className="text-sm text-seal capitalize">{project.genre}</span>
         </div>
         <div className="flex gap-2">
+          <Link to={`/projects/${project.id}/companion-chat`} className="btn-secondary flex items-center gap-2 text-sm">
+            <MessageCircle size={16} /> Companion Chat
+          </Link>
           <button onClick={handleExport} disabled={exporting} className="btn-secondary flex items-center gap-2 text-sm">
             <Download size={16} /> {exporting ? 'Exporting...' : 'Export .docx'}
           </button>

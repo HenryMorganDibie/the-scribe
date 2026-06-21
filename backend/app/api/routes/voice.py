@@ -257,6 +257,7 @@ async def voice_drift_analytics(
     chapter_breakdown = [
         {
             "chapter_id": ch.id,
+            "project_id": ch.project_id,
             "chapter_number": ch.chapter_number,
             "chapter_title": ch.title,
             "voice_match_score": ch.voice_match_score,

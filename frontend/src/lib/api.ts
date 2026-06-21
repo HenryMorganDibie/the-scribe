@@ -27,14 +27,20 @@ api.interceptors.response.use(
 
 /**
  * Stream an SSE endpoint, calling onChunk for each text delta.
- * Used for: chapter generation, continue, weave-story, chat.
+ * Used for: chapter generation, continue, weave-story, chat, companion-chat.
+ *
+ * onEvent is called for any parsed JSON payload that has no `text` or
+ * `error` key (e.g. companion-chat's final `{cited_chapter_ids: [...]}`
+ * event) — onChunk only fires for text deltas, onEvent for everything else,
+ * so existing callers that only pass onChunk are unaffected.
  */
 export async function streamSSE(
   path: string,
   body: object,
   onChunk: (text: string) => void,
   onDone?: () => void,
-  onError?: (err: string) => void
+  onError?: (err: string) => void,
+  onEvent?: (payload: any) => void
 ) {
   const token = localStorage.getItem('scribe_token')
   const res = await fetch(`${API_URL}${path}`, {
@@ -75,6 +81,8 @@ export async function streamSSE(
           onError?.(parsed.error)
         } else if (parsed.text) {
           onChunk(parsed.text)
+        } else {
+          onEvent?.(parsed)
         }
       } catch {
         // For onboarding preview, raw text chunks (not JSON)
