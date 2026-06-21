@@ -85,9 +85,8 @@ async def index_writing_sample(user_id: str, text: str, db) -> int:
     """
     from app.models import DocumentEmbedding
 
-    service = EmbeddingService()
-    chunks = service.chunk_text(text)
-    embeddings = await service.embed_batch(chunks)
+    chunks = embedding_service.chunk_text(text)
+    embeddings = await embedding_service.embed_batch(chunks)
 
     for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
         doc = DocumentEmbedding(
@@ -107,9 +106,8 @@ async def index_testimony(user_id: str, testimony_id: str, text: str, db) -> int
     """Index a testimony for vector retrieval."""
     from app.models import DocumentEmbedding
 
-    service = EmbeddingService()
-    chunks = service.chunk_text(text, chunk_size=300)
-    embeddings = await service.embed_batch(chunks)
+    chunks = embedding_service.chunk_text(text, chunk_size=300)
+    embeddings = await embedding_service.embed_batch(chunks)
 
     for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
         doc = DocumentEmbedding(
@@ -151,9 +149,8 @@ async def index_chapter(user_id: str, project_id: str, chapter_id: str, html_con
         await db.commit()
         return 0
 
-    service = EmbeddingService()
-    chunks = service.chunk_text(plain_text, chunk_size=350, overlap=40)
-    embeddings = await service.embed_batch(chunks)
+    chunks = embedding_service.chunk_text(plain_text, chunk_size=350, overlap=40)
+    embeddings = await embedding_service.embed_batch(chunks)
 
     for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
         doc = DocumentEmbedding(
