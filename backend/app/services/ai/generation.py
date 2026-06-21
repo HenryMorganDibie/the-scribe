@@ -364,18 +364,85 @@ async def score_voice_match(content: str, profile: VoiceProfile) -> float:
     """
     Score how well a piece of text matches the author's voice.
     Returns 0.0–1.0 using embedding cosine similarity against their corpus.
+
+    Kept as a thin wrapper around analyze_voice_drift() for backward
+    compatibility with existing callers that only want the headline number.
     """
-    if not profile.voice_summary:
-        return 0.75  # default when no baseline
+    analysis = await analyze_voice_drift(content, profile)
+    return analysis["overall_score"]
 
-    content_embedding = await embedding_service.embed(content[:1000])
-    voice_embedding = await embedding_service.embed(profile.voice_summary)
 
-    # Cosine similarity
-    import numpy as np
-    a = np.array(content_embedding)
-    b = np.array(voice_embedding)
-    similarity = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+def _text_cadence_score(text: str) -> float:
+    """
+    Approximate cadence (sentence length/rhythm) on a 0.0 (punchy/short) to
+    1.0 (flowing/long) scale, mirroring how cadence_score is described
+    elsewhere in the voice profile — used to compare generated text's
+    cadence against the author's baseline.
+    """
+    import re
+    sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
+    if not sentences:
+        return 0.5
+    avg_words = sum(len(s.split()) for s in sentences) / len(sentences)
+    # 6 words/sentence -> 0.0 (punchy), 28+ words/sentence -> 1.0 (flowing)
+    return round(min(1.0, max(0.0, (avg_words - 6) / 22)), 3)
 
-    # Scale to 0.5–1.0 range (cosine sim on text is rarely below 0.5)
-    return round(min(1.0, max(0.0, (similarity + 1) / 2)), 3)
+
+async def analyze_voice_drift(content: str, profile: VoiceProfile) -> dict:
+    """
+    Multi-dimensional voice match analysis, broken into the components Voice
+    Drift Analytics displays: overall similarity, cadence match, signature
+    phrase usage, and anchor scripture usage — not just one blended number.
+
+    Returns:
+        {
+            "overall_score": float 0-1,
+            "cadence_score": float 0-1 (the TEXT's own cadence, comparable to profile.cadence_score),
+            "cadence_delta": float (text cadence minus profile baseline cadence; signed),
+            "phrase_matches": [phrases from profile.signature_phrases found in content],
+            "phrase_usage_rate": float 0-1 (matched / total signature phrases, only meaningful if profile has phrases),
+            "scripture_matches": [refs from profile.anchor_scriptures found in content],
+        }
+    """
+    content_lower = content.lower()
+
+    # Overall semantic similarity against the voice summary (unchanged logic)
+    overall_score = 0.75
+    if profile.voice_summary:
+        content_embedding = await embedding_service.embed(content[:1000])
+        voice_embedding = await embedding_service.embed(profile.voice_summary)
+        import numpy as np
+        a = np.array(content_embedding)
+        b = np.array(voice_embedding)
+        similarity = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+        overall_score = round(min(1.0, max(0.0, (similarity + 1) / 2)), 3)
+
+    # Cadence: compare the text's own rhythm against the profile's baseline
+    text_cadence = _text_cadence_score(content)
+    baseline_cadence = profile.cadence_score if profile.cadence_score is not None else 0.5
+    cadence_delta = round(text_cadence - baseline_cadence, 3)
+
+    # Signature phrase usage — literal substring match (case-insensitive)
+    phrases = profile.signature_phrases or []
+    phrase_matches = [p for p in phrases if p.lower() in content_lower]
+    phrase_usage_rate = round(len(phrase_matches) / len(phrases), 3) if phrases else None
+
+    # Anchor scripture usage — literal reference match (e.g. "Isaiah 61")
+    scriptures = profile.anchor_scriptures or []
+    scripture_matches = []
+    for s in scriptures:
+        ref = s.get("ref", "") if isinstance(s, dict) else str(s)
+        # Match on the book+chapter portion so "Isaiah 61:1-3" still matches
+        # text that cites "Isaiah 61:2" or similar nearby verses.
+        book_chapter = ref.split(":")[0].strip()
+        if book_chapter and book_chapter.lower() in content_lower:
+            scripture_matches.append(ref)
+
+    return {
+        "overall_score": overall_score,
+        "cadence_score": text_cadence,
+        "cadence_delta": cadence_delta,
+        "phrase_matches": phrase_matches,
+        "phrase_usage_rate": phrase_usage_rate,
+        "scripture_matches": scripture_matches,
+    }

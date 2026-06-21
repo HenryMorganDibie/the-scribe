@@ -124,3 +124,48 @@ async def index_testimony(user_id: str, testimony_id: str, text: str, db) -> int
 
     await db.commit()
     return len(chunks)
+
+
+async def index_chapter(user_id: str, project_id: str, chapter_id: str, html_content: str, db) -> int:
+    """
+    Chunk and embed a chapter's content for Manuscript Companion Chat retrieval.
+
+    Re-indexes from scratch on every call (delete existing chunks for this
+    chapter, then insert fresh ones) since chapter content changes on every
+    save -- unlike writing samples/testimonies, which are written once.
+    """
+    from sqlalchemy import delete
+    from app.models import DocumentEmbedding
+    from app.services.export.docx_export import html_to_plain
+
+    plain_text = html_to_plain(html_content or "").strip()
+
+    await db.execute(
+        delete(DocumentEmbedding).where(
+            DocumentEmbedding.doc_type == "chapter",
+            DocumentEmbedding.source_id == chapter_id,
+        )
+    )
+
+    if not plain_text:
+        await db.commit()
+        return 0
+
+    service = EmbeddingService()
+    chunks = service.chunk_text(plain_text, chunk_size=350, overlap=40)
+    embeddings = await service.embed_batch(chunks)
+
+    for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+        doc = DocumentEmbedding(
+            user_id=user_id,
+            doc_type="chapter",
+            source_id=chapter_id,
+            project_id=project_id,
+            chunk_index=i,
+            content=chunk,
+            embedding=emb,
+        )
+        db.add(doc)
+
+    await db.commit()
+    return len(chunks)

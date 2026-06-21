@@ -124,8 +124,9 @@ class DocumentEmbedding(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"))
 
-    doc_type: Mapped[str] = mapped_column(String)  # 'writing_sample'|'testimony'|'chapter'
-    source_id: Mapped[Optional[str]] = mapped_column(String)  # testimony_id or chapter_id if applicable
+    doc_type: Mapped[str] = mapped_column(String)  # 'writing_sample'|'testimony'|'chapter'|'sermon'
+    source_id: Mapped[Optional[str]] = mapped_column(String)  # testimony_id / chapter_id / sermon_id
+    project_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"))  # set for doc_type='chapter' — scopes Companion Chat retrieval to one manuscript without a join
     chunk_index: Mapped[int] = mapped_column(Integer, default=0)
     content: Mapped[str] = mapped_column(Text)  # the chunk text
     embedding: Mapped[List[float]] = mapped_column(Vector(384))  # all-MiniLM-L6-v2 dim
@@ -137,6 +138,7 @@ class DocumentEmbedding(Base):
 
     __table_args__ = (
         Index("ix_doc_embeddings_user_type", "user_id", "doc_type"),
+        Index("ix_doc_embeddings_project", "project_id"),
     )
 
 
@@ -246,6 +248,36 @@ class Chapter(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="chapters")
+
+
+# ─────────────────────────────────────────────
+# MANUSCRIPT COMPANION CHAT
+# Whole-manuscript-aware conversation history, per project.
+# Distinct from the chapter-scoped /generate/chat — this one retrieves
+# across ALL of a project's chapters via pgvector (see DocumentEmbedding
+# doc_type='chapter') plus a structural manifest (titles/status/scriptures),
+# so it can answer cross-chapter questions like "have I covered this?" or
+# "where have I used this scripture before?".
+# ─────────────────────────────────────────────
+class CompanionChatMessage(Base):
+    __tablename__ = "companion_chat_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"))
+
+    role: Mapped[str] = mapped_column(String)  # 'user' | 'assistant'
+    content: Mapped[str] = mapped_column(Text)
+
+    # Which chapters were retrieved/cited for this answer (assistant messages only) —
+    # lets the UI show "sourced from Chapter 3, Chapter 7" style references.
+    referenced_chapter_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_companion_chat_project", "project_id", "created_at"),
+    )
 
 
 # ─────────────────────────────────────────────

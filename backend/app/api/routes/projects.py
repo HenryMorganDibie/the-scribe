@@ -1,4 +1,6 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -8,6 +10,7 @@ from app.db.session import get_db
 from app.models import User, Project, Chapter
 from app.core.security import get_current_user
 from app.utils.jobs import fire_background_job
+from app.services.ai.companion_chat import companion_chat_stream, save_message, get_history
 
 router = APIRouter(tags=["projects"])
 
@@ -166,10 +169,12 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
 
     await db.commit()
 
-    # Schedule summary generation if content was updated — runs after response is sent
+    # Schedule summary generation + companion-chat re-indexing if content
+    # was updated — both run after response is sent, independently.
     if body.content:
-        from app.workers.tasks import generate_chapter_summary_task
+        from app.workers.tasks import generate_chapter_summary_task, index_chapter_task
         fire_background_job(background_tasks, generate_chapter_summary_task, chapter_id, job_name="generate_chapter_summary")
+        fire_background_job(background_tasks, index_chapter_task, chapter_id, job_name="index_chapter")
 
     return {"updated": True}
 
@@ -195,3 +200,69 @@ async def delete_chapter(project_id: str, chapter_id: str, current_user: User = 
         raise HTTPException(status_code=404, detail="Chapter not found")
     await db.delete(chapter)
     await db.commit()
+
+
+# ── Manuscript Companion Chat ──────────────────
+# Whole-manuscript-aware assistant (distinct from the chapter-scoped
+# /generate/chat). See app/services/ai/companion_chat.py.
+
+class CompanionChatRequest(BaseModel):
+    message: str
+
+
+@router.get("/projects/{project_id}/companion-chat/history")
+async def companion_chat_history(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    messages = await get_history(project_id, db)
+    return [
+        {
+            "id": m.id, "role": m.role, "content": m.content,
+            "referenced_chapter_ids": m.referenced_chapter_ids or [],
+            "created_at": m.created_at,
+        }
+        for m in messages
+    ]
+
+
+@router.post("/projects/{project_id}/companion-chat")
+async def companion_chat(
+    project_id: str,
+    body: CompanionChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    history_msgs = await get_history(project_id, db)
+    history = [{"role": m.role, "content": m.content} for m in history_msgs]
+
+    await save_message(project_id, current_user.id, "user", body.message, db)
+
+    async def stream():
+        buffer = []
+        cited_ids: List[str] = []
+        async for chunk in companion_chat_stream(project_id, body.message, history, db):
+            if chunk.startswith("\n\n[CITED:"):
+                cited_str = chunk.replace("\n\n[CITED:", "").rstrip("]")
+                cited_ids[:] = [c for c in cited_str.split(",") if c]
+            else:
+                buffer.append(chunk)
+                yield f"data: {json.dumps({'text': chunk})}\n\n"
+
+        full_answer = "".join(buffer)
+        if full_answer.strip():
+            await save_message(project_id, current_user.id, "assistant", full_answer, db, referenced_chapter_ids=cited_ids)
+
+        yield f"data: {json.dumps({'cited_chapter_ids': cited_ids})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
