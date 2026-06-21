@@ -42,8 +42,24 @@ async def upload_sermon(
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext in _EXT_TO_TYPE:
             source_type = _EXT_TO_TYPE[ext]
-        elif ext in ("mp3", "m4a", "wav", "mpga", "mp4", "webm"):
+        elif ext in ("mp3", "m4a", "wav", "mpga"):
             source_type = "audio"
+        elif ext in ("mp4", "webm", "mov", "mkv"):
+            # Video containers are NOT supported yet -- this pipeline has no
+            # video/audio-track extraction step. Sending a raw video file to
+            # Groq's audio transcription endpoint silently misbehaves (huge
+            # upload for the file size limit, undefined transcription
+            # behavior) rather than failing clearly, which is exactly what
+            # was happening here before this fix. Reject explicitly instead.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Video files (.{ext}) aren't supported yet -- only the audio track can be "
+                    "transcribed, and that extraction step doesn't exist yet. "
+                    "Please upload an audio file (.mp3, .m4a, .wav) instead, or extract the audio "
+                    "from your video first."
+                ),
+            )
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: .{ext}")
         file_bytes = await file.read()
