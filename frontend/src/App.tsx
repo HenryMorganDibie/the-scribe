@@ -12,6 +12,8 @@ import VoiceProfile from '@/pages/VoiceProfile'
 import Projects from '@/pages/Projects'
 import ManuscriptStudio from '@/pages/ManuscriptStudio'
 import ChapterEditor from '@/pages/ChapterEditor'
+import CompanionChat from '@/pages/CompanionChat'
+import VoiceDriftAnalytics from '@/pages/VoiceDriftAnalytics'
 import Testimonies from '@/pages/Testimonies'
 import Sermons from '@/pages/Sermons'
 import MinistryDNA from '@/pages/MinistryDNA'
@@ -73,12 +75,14 @@ export default function App() {
         >
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/voice-profile" element={<VoiceProfile />} />
+          <Route path="/voice-profile/drift-analytics" element={<VoiceDriftAnalytics />} />
           <Route path="/testimonies" element={<Testimonies />} />
           <Route path="/sermons" element={<Sermons />} />
           <Route path="/ministry-dna" element={<MinistryDNA />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:id" element={<ManuscriptStudio />} />
           <Route path="/projects/:id/chapters/:chapterId" element={<ChapterEditor />} />
+          <Route path="/projects/:id/companion-chat" element={<CompanionChat />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

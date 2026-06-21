@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Feather, GitCommit, TrendingUp, TrendingDown, Minus, BookOpen } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Feather, GitCommit, TrendingUp, TrendingDown, Minus, BookOpen, Activity } from 'lucide-react'
 import { api } from '@/lib/api'
 
 interface VoiceProfileData {
@@ -55,9 +56,14 @@ export default function VoiceProfile() {
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
-      <div className="mb-8 flex items-center gap-3">
-        <Feather size={24} className="text-seal" />
-        <h1 className="font-display text-display-md font-semibold">Voice DNA</h1>
+      <div className="mb-8 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Feather size={24} className="text-seal" />
+          <h1 className="font-display text-display-md font-semibold">Voice DNA</h1>
+        </div>
+        <Link to="/voice-profile/drift-analytics" className="btn-secondary flex items-center gap-2 text-sm">
+          <Activity size={16} /> Drift Analytics
+        </Link>
       </div>
 
       {!profile?.voice_summary ? (
