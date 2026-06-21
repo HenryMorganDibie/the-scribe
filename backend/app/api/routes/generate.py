@@ -17,6 +17,7 @@ from app.core.security import get_current_user
 from app.services.ai.generation import (
     generate_chapter_stream,
     score_voice_match,
+    analyze_voice_drift,
     build_voice_brief,
     get_chapter_memory,
 )
@@ -202,7 +203,8 @@ async def voice_check(
     db: AsyncSession = Depends(get_db),
 ):
     profile = await _get_profile(current_user.id, db)
-    score = await score_voice_match(body.text, profile)
+    analysis = await analyze_voice_drift(body.text, profile)
+    score = analysis["overall_score"]
 
     # Also get LLM feedback on what's off
     if score < 0.75:
@@ -223,17 +225,35 @@ Passage:
     else:
         feedback = "This passage is strongly in your voice."
 
-    # Update chapter voice match score
+    # Update chapter voice match score (latest snapshot) and log this check
+    # as a GenerationLog row so Voice Drift Analytics has historical trend
+    # data to chart — previously this route updated the chapter but never
+    # wrote a log row, so no trend could ever be computed.
     result = await db.execute(select(Chapter).where(Chapter.id == body.chapter_id))
     chapter = result.scalar_one_or_none()
     if chapter:
         chapter.voice_match_score = score
-        await db.commit()
+
+    log = GenerationLog(
+        user_id=current_user.id,
+        chapter_id=body.chapter_id,
+        action="voice_check",
+        model=settings.LLM_PROVIDER,
+        voice_match_score=score,
+        success=True,
+    )
+    db.add(log)
+    await db.commit()
 
     return {
         "voice_match_score": score,
         "grade": "Excellent" if score >= 0.9 else "Strong" if score >= 0.8 else "Good" if score >= 0.7 else "Needs work",
         "feedback": feedback,
+        "cadence_score": analysis["cadence_score"],
+        "cadence_delta": analysis["cadence_delta"],
+        "phrase_matches": analysis["phrase_matches"],
+        "phrase_usage_rate": analysis["phrase_usage_rate"],
+        "scripture_matches": analysis["scripture_matches"],
     }
 
 

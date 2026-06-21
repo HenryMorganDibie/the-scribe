@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from app.db.session import get_db
-from app.models import User, VoiceProfile, Testimony
+from app.models import User, VoiceProfile, Testimony, GenerationLog, Chapter
 from app.core.security import get_current_user
 from app.services.voice.timeline import get_timeline, snapshot_voice, diff_versions
 from app.utils.jobs import fire_background_job
@@ -191,3 +191,84 @@ async def delete_testimony(testimony_id: str, current_user: User = Depends(get_c
         raise HTTPException(status_code=404, detail="Testimony not found")
     await db.delete(t)
     await db.commit()
+
+
+# ── Voice Drift Analytics ──────────────────────
+# Trend data over time, sourced from GenerationLog rows written by every
+# /generate/voice-check call (see app/api/routes/generate.py). Distinct from
+# the single "latest score" shown per-chapter in Manuscript Studio — this
+# shows how voice match has trended across every check the author has run.
+
+@router.get("/voice-profile/drift-analytics")
+async def voice_drift_analytics(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(GenerationLog)
+        .where(GenerationLog.user_id == current_user.id)
+        .where(GenerationLog.action == "voice_check")
+        .where(GenerationLog.voice_match_score.isnot(None))
+        .order_by(GenerationLog.created_at)
+    )
+    logs = result.scalars().all()
+
+    if not logs:
+        return {
+            "has_data": False,
+            "message": "Run \"Check My Voice\" on a chapter to start building drift analytics.",
+            "timeline": [],
+            "average_score": None,
+            "trend": None,
+            "chapter_breakdown": [],
+        }
+
+    timeline = [
+        {
+            "date": log.created_at.isoformat(),
+            "score": log.voice_match_score,
+            "chapter_id": log.chapter_id,
+        }
+        for log in logs
+    ]
+
+    scores = [log.voice_match_score for log in logs]
+    average_score = round(sum(scores) / len(scores), 3)
+
+    # Trend: compare the average of the first half of checks to the second
+    # half — simple and robust for small sample counts, avoids overfitting
+    # a regression line to a handful of points.
+    trend = None
+    if len(scores) >= 4:
+        midpoint = len(scores) // 2
+        first_half_avg = sum(scores[:midpoint]) / midpoint
+        second_half_avg = sum(scores[midpoint:]) / (len(scores) - midpoint)
+        delta = second_half_avg - first_half_avg
+        trend = "improving" if delta > 0.03 else "declining" if delta < -0.03 else "stable"
+
+    # Per-chapter breakdown — latest score per chapter, for a bar-chart view
+    chapter_result = await db.execute(
+        select(Chapter)
+        .where(Chapter.user_id == current_user.id)
+        .where(Chapter.voice_match_score.isnot(None))
+        .order_by(Chapter.chapter_number)
+    )
+    chapters = chapter_result.scalars().all()
+    chapter_breakdown = [
+        {
+            "chapter_id": ch.id,
+            "chapter_number": ch.chapter_number,
+            "chapter_title": ch.title,
+            "voice_match_score": ch.voice_match_score,
+        }
+        for ch in chapters
+    ]
+
+    return {
+        "has_data": True,
+        "timeline": timeline,
+        "average_score": average_score,
+        "trend": trend,
+        "total_checks": len(logs),
+        "chapter_breakdown": chapter_breakdown,
+    }

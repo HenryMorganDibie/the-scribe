@@ -31,7 +31,7 @@ from sqlalchemy import select
 from app.db.session import AsyncSessionLocal
 from app.models import VoiceProfile, Chapter
 from app.services.ai.generation import extract_voice_dna, generate_chapter_summary
-from app.services.voice.embeddings import index_writing_sample, index_testimony
+from app.services.voice.embeddings import index_writing_sample, index_testimony, index_chapter
 from app.services.voice.timeline import snapshot_voice
 
 import structlog
@@ -119,3 +119,22 @@ async def generate_chapter_summary_task(chapter_id: str) -> None:
             await db.commit()
     except Exception:
         logger.exception("generate_chapter_summary_task_failed", chapter_id=chapter_id)
+
+
+async def index_chapter_task(chapter_id: str) -> None:
+    """
+    Re-index a chapter's content into pgvector for Manuscript Companion Chat
+    retrieval. Runs independently of generate_chapter_summary_task (separate
+    failure domains -- a broken summary shouldn't block retrieval indexing
+    and vice versa) whenever chapter content is saved.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+            chapter = result.scalar_one_or_none()
+            if not chapter:
+                return
+
+            await index_chapter(chapter.user_id, chapter.project_id, chapter.id, chapter.content, db)
+    except Exception:
+        logger.exception("index_chapter_task_failed", chapter_id=chapter_id)
