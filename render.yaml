@@ -1,8 +1,12 @@
 # Render Blueprint for The Scribe.
 #
-# Deploy: on Render, New + > "Blueprint", pick this repo, and choose the branch
-# you want (e.g. feat/sermon-ingestion-testimony-dna — Render is NOT limited to
-# main). Render reads this file and creates the two services below.
+# Branch: main. Render services were originally created against
+# feat/sermon-ingestion-testimony-dna; that branch was merged into main and
+# deleted (see PR #2), so any Render service still configured for it stops
+# receiving new commits silently -- deploys "succeed" against a stale branch
+# tip with no warning. If you see a database column the code expects but the
+# DB doesn't have (or vice versa), check Render's dashboard -> service ->
+# Settings -> Branch first.
 #
 # Before the first deploy succeeds you must fill in the env vars marked
 # `sync: false` in the Render dashboard (they are secrets / environment-specific
@@ -16,7 +20,7 @@ services:
   - type: web
     name: the-scribe-api
     runtime: docker
-    branch: feat/sermon-ingestion-testimony-dna
+    branch: main
     # Build the image from backend/Dockerfile with the build context set to
     # backend/, so the app module resolves as `app.main` (see the Dockerfile
     # comment). This mirrors how the app runs locally.
@@ -59,7 +63,7 @@ services:
   - type: web
     name: the-scribe-web
     runtime: static
-    branch: feat/sermon-ingestion-testimony-dna
+    branch: main
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
