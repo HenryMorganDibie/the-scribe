@@ -20,6 +20,7 @@ export default function Sermons() {
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const load = () => api.get('/sermons').then((r) => setSermons(r.data))
@@ -33,18 +34,31 @@ export default function Sermons() {
     return () => clearInterval(t)
   }, [sermons])
 
+  const MAX_FILE_BYTES = 25 * 1024 * 1024 // matches the backend's Groq Whisper cap
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const file = fileRef.current?.files?.[0]
     if (!title.trim()) return toast.error('Give the sermon a title')
     if (!file && !text.trim()) return toast.error('Upload a file or paste text')
+    if (file && file.size > MAX_FILE_BYTES) {
+      return toast.error(`That file is ${Math.round(file.size / 1024 / 1024)}MB — the limit is 25MB.`)
+    }
+
     setSubmitting(true)
+    setUploadProgress(file ? 0 : null)
     try {
       const form = new FormData()
       form.append('title', title)
       if (file) form.append('file', file)
       else form.append('text', text)
-      await api.post('/sermons', form)
+
+      await api.post('/sermons', form, {
+        onUploadProgress: (evt) => {
+          if (file && evt.total) setUploadProgress(Math.round((evt.loaded / evt.total) * 100))
+        },
+      })
+
       toast.success('Sermon uploaded — processing in the background')
       setTitle(''); setText('')
       if (fileRef.current) fileRef.current.value = ''
@@ -53,6 +67,7 @@ export default function Sermons() {
       toast.error(err?.response?.data?.detail || 'Upload failed')
     } finally {
       setSubmitting(false)
+      setUploadProgress(null)
     }
   }
 
@@ -80,10 +95,21 @@ export default function Sermons() {
           className="input-field w-full h-32 resize-none"
           placeholder="Paste a transcript here, or choose a file below..."
         />
-        <input ref={fileRef} type="file" accept=".pdf,.docx,.mp3,.m4a,.wav,.webm,.mp4" className="block text-sm text-study-400" />
+        <div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.docx,.mp3,.m4a,.wav,.mpga"
+            className="block text-sm text-study-400"
+          />
+          <p className="text-xs text-study-300 mt-1">
+            PDF, DOCX, or audio (.mp3/.m4a/.wav, up to 25MB). Video files aren't supported yet —
+            extract the audio first if you have a recording.
+          </p>
+        </div>
         <button type="submit" disabled={submitting} className="btn-primary flex items-center gap-2">
           {submitting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-          Upload sermon
+          {submitting && uploadProgress !== null ? `Uploading… ${uploadProgress}%` : 'Upload sermon'}
         </button>
       </form>
 

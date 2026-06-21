@@ -46,15 +46,30 @@ function gradeLabel(score: number) {
 export default function VoiceDriftAnalytics() {
   const [data, setData] = useState<DriftAnalytics | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
-  useEffect(() => {
+  const load = () => {
+    setLoading(true)
+    setError(false)
     api.get('/voice-profile/drift-analytics')
       .then((r) => setData(r.data))
+      .catch(() => setError(true))
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
   }, [])
 
   if (loading) return <div className="p-8 text-study-300">Loading drift analytics...</div>
-  if (!data) return <div className="p-8 text-study-300">Couldn't load analytics.</div>
+  if (error || !data) {
+    return (
+      <div className="p-8">
+        <p className="text-study-300 mb-3">Couldn't load analytics — this can happen right after a deploy.</p>
+        <button onClick={load} className="btn-secondary text-sm">Try again</button>
+      </div>
+    )
+  }
 
   const chartData = data.timeline.map((t, i) => ({
     check: `#${i + 1}`,
