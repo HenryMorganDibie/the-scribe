@@ -8,6 +8,7 @@ Create Date: 2026-06-23 12:14:28.340897
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from pgvector.sqlalchemy import Vector
 
 # revision identifiers, used by Alembic.
 revision = '4848eaa0f8a2'
@@ -70,7 +71,7 @@ def upgrade() -> None:
                existing_type=sa.TEXT(),
                nullable=False)
     op.alter_column('document_embeddings', 'embedding',
-               existing_type=pgvector.sqlalchemy.vector.VECTOR(dim=384),
+               existing_type=Vector(384),
                nullable=False)
     op.alter_column('document_embeddings', 'created_at',
                existing_type=postgresql.TIMESTAMP(),
@@ -177,7 +178,7 @@ def upgrade() -> None:
     op.drop_constraint('users_email_key', 'users', type_='unique')
     op.drop_index('ix_users_email', table_name='users')
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
-    op.add_column('voice_profiles', sa.Column('voice_summary_embedding', pgvector.sqlalchemy.vector.VECTOR(dim=384), nullable=True))
+    op.add_column('voice_profiles', sa.Column('voice_summary_embedding', Vector(384), nullable=True))
     op.alter_column('voice_profiles', 'user_id',
                existing_type=sa.VARCHAR(),
                nullable=False)
@@ -342,7 +343,7 @@ def downgrade() -> None:
                nullable=True,
                existing_server_default=sa.text('now()'))
     op.alter_column('document_embeddings', 'embedding',
-               existing_type=pgvector.sqlalchemy.vector.VECTOR(dim=384),
+               existing_type=Vector(384),
                nullable=True)
     op.alter_column('document_embeddings', 'content',
                existing_type=sa.TEXT(),
