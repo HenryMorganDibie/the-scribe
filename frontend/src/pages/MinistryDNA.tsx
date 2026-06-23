@@ -49,7 +49,7 @@ export default function MinistryDNA() {
   const { metrics, narrative, sermon_count } = report
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="px-4 py-6 md:p-8 max-w-5xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <Fingerprint size={24} className="text-seal" />
         <h1 className="font-display text-display-md font-semibold">Ministry DNA</h1>
@@ -61,7 +61,7 @@ export default function MinistryDNA() {
         <p className="text-study-400 leading-relaxed">{narrative}</p>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <RankedList title="Most-quoted scriptures" items={metrics.top_scriptures.map((s) => ({ label: s.ref, count: s.count }))} />
         <RankedList title="Most-used phrases" items={metrics.top_phrases.map((p) => ({ label: p.phrase, count: p.count }))} />
         <RankedList title="Recurring themes" items={metrics.top_themes.map((t) => ({ label: t.theme, count: t.count }))} />

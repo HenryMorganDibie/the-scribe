@@ -55,7 +55,7 @@ export default function VoiceProfile() {
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="px-4 py-6 md:p-8 max-w-5xl mx-auto">
       <div className="mb-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Feather size={24} className="text-seal" />

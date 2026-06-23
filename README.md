@@ -17,15 +17,15 @@ for both — no separate branches or config forks.
 | | **Local development** | **Railway (or similar PaaS)** |
 |---|---|---|
 | Use this when | Developing, testing, recording a demo | You want a live URL to share (e.g. as a portfolio link) |
-| Database | Docker Compose Postgres+pgvector | Railway Postgres plugin (or Supabase) |
+| Database | Docker Compose Postgres+pgvector | Supabase (pgvector included) |
 | Setup time | ~10 minutes | ~15 minutes after local setup works |
-| Section to follow | [Setup](#setup) → [Running it](#running-it) | [Deploying to Railway](#deploying-to-railway) |
+| Section to follow | [Setup](#setup) → [Running it](#running-it) | [Deploying to Render](#deploying-to-render) |
 
 **Recommendation**: get it running locally first (it's faster to iterate and
 debug), confirm the [smoke test](#1-one-command-end-to-end-smoke-test-recommended)
-passes, *then* deploy to Railway if you want a live link. The Railway setup
+passes, *then* deploy to Render if you want a live link. The Render setup
 reuses the same `Dockerfile`, `DATABASE_URL`-based config, and migrations —
-nothing about local development changes if you never touch Railway.
+nothing about local development changes if you never touch Render.
 
 ---
 
@@ -49,7 +49,7 @@ nothing about local development changes if you never touch Railway.
 - [Project structure](#project-structure)
 - [Design system](#design-system)
 - [Known limitations / what's stubbed](#known-limitations--whats-stubbed)
-- [Deploying to Railway](#deploying-to-railway)
+- [Deploying to Render](#deploying-to-render)
   - [1. Postgres with pgvector](#1-postgres-with-pgvector)
   - [2. Redis](#2-redis)
   - [3. API service](#3-api-service)
@@ -217,7 +217,7 @@ is normalized to an async URL in your environment.
 A single `DATABASE_URL` is all the database config needed — `app/core/config.py`
 normalizes whatever Postgres scheme it's given (this is what lets the exact same
 `.env` structure work against Railway's or Supabase's connection strings later,
-covered in [Deploying to Railway](#deploying-to-railway)).
+covered in [Deploying to Render](#deploying-to-render)).
 
 Run migrations and seed the scripture index:
 
@@ -568,7 +568,7 @@ the-scribe/
 ├── docker-compose.yml          # Local: Postgres+pgvector, Redis
 ├── backend/
 │   ├── Dockerfile               # Production image (API + worker share this)
-│   ├── railway.json              # Railway service config for the API
+│   ├── Dockerfile                # Production container (used by Render)
 │   ├── app/
 │   │   ├── api/routes/          # auth, onboarding, projects, voice, generate, export
 │   │   ├── core/                 # config (DATABASE_URL normalization,
@@ -648,56 +648,39 @@ in `frontend/src/styles/globals.css`.
 
 ---
 
-## Deploying to Railway
+## Deploying to Render
 
-The backend ships with everything Railway needs: `backend/Dockerfile`,
-`backend/railway.json`, and a config layer (`app/core/config.py`) that accepts
-Railway's injected `DATABASE_URL` and `PORT` without modification. This section
-assumes local setup already works — Railway runs the *same* image and migrations,
-just against managed Postgres/Redis instead of Docker Compose.
+The backend ships with a `Dockerfile` and `render.yaml` blueprint. Background
+jobs (voice DNA, embeddings, sermon ingestion) run in-process via FastAPI
+`BackgroundTasks` — there is no separate worker service or Redis dependency.
+A single Render web service is all you need on the backend.
 
-You'll create **four services** in one Railway project: Postgres, Redis, the API,
-and a worker. The frontend deploys separately to Vercel (or Netlify).
+### 1. Database — Supabase (required: pgvector)
 
-### 1. Postgres with pgvector
+Create a free project at [supabase.com](https://supabase.com). pgvector is
+enabled by default. Under **Project Settings → Database → Connection string**,
+copy the **Session pooler** string (port 5432, `pooler.supabase.com` host).
+This is your `DATABASE_URL`.
 
-Railway's default Postgres template does not include the `vector` extension.
-Two options, in order of preference:
+> **Why Supabase instead of Render's own Postgres?** Render's standard Postgres
+> service does not include pgvector. Supabase's free tier does, and it's what
+> this app is already running against in production.
 
-- **Railway template gallery**: search for a "PostgreSQL + pgvector" template
-  when adding a new service. If available, use it — it behaves identically to
-  `ankane/pgvector` used in `docker-compose.yml`.
-- **Supabase fallback**: if no pgvector template is available, create a free
-  Supabase project instead (pgvector is enabled by default under
-  Database → Extensions) and use its connection string as `DATABASE_URL` for
-  the Railway services below. Everything else (Redis, API, worker) still runs
-  on Railway.
+### 2. Backend (Render Web Service)
 
-Either way, copy the resulting Postgres connection string — you'll set it as
-`DATABASE_URL` on both the API and worker services. Railway lets you reference
-a Postgres service's URL directly as `${{Postgres.DATABASE_URL}}` in another
-service's variables, which is the cleanest approach if you used the Railway
-template.
+"New → Web Service" → connect GitHub repo → **Root directory: `backend`**.
 
-### 2. Redis
+Render will detect `backend/Dockerfile` automatically.
 
-Add Redis from Railway's template gallery (one click). Reference it as
-`${{Redis.REDIS_URL}}` in the API and worker services' variables.
-
-### 3. API service
-
-"Deploy from GitHub repo" → select this repo → **set the root directory to
-`/backend`**. Railway will detect `backend/railway.json` and `backend/Dockerfile`
-automatically.
-
-Environment variables (Settings → Variables):
+Environment variables (Settings → Environment):
 
 ```env
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-REDIS_URL=${{Redis.REDIS_URL}}
+DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-1-*.pooler.supabase.com:5432/postgres
 
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
+
+GROQ_API_KEY=gsk_...        # Required for sermon audio transcription (Whisper)
 
 SECRET_KEY=<generate a long random string>
 ENVIRONMENT=production
@@ -705,60 +688,50 @@ ENVIRONMENT=production
 CORS_ORIGINS=["https://your-frontend.vercel.app"]
 ```
 
-`PORT` is injected by Railway automatically — `railway.json`'s start command
-already uses `$PORT`. On deploy, the start command runs
-`alembic upgrade head && python scripts/seed_scriptures.py && uvicorn ...` —
-migrations and scripture seeding happen automatically on every deploy
-(seeding is idempotent — it skips references that already exist).
+`PORT` is injected by Render automatically. On every deploy, the start command
+runs automatically (defined in `render.yaml`):
 
-Once deployed, confirm with:
 ```bash
-curl https://your-api.up.railway.app/api/health
-curl https://your-api.up.railway.app/api/health/db
+alembic upgrade head && python scripts/seed_scriptures.py && uvicorn app.main:app ...
 ```
 
-### 4. Worker service
+Migrations and scripture seeding happen on every deploy — both are idempotent.
+`ENVIRONMENT=production` activates `validate_for_startup()`, which refuses to
+start if `SECRET_KEY` is the default placeholder or the active LLM provider's
+key is missing.
 
-Add a **second service from the same GitHub repo and root directory
-(`/backend`)** — same Dockerfile, same image. The only difference is the start
-command, which you override in this service's Settings → Deploy:
-
+Confirm once deployed:
+```bash
+curl https://your-api.onrender.com/api/health
+curl https://your-api.onrender.com/api/health/db
 ```
-dramatiq app.workers.tasks
-```
 
-Give it the same `DATABASE_URL`, `REDIS_URL`, `LLM_PROVIDER`, and provider API
-key as the API service (Railway lets you copy variables between services in
-one click). This is what makes Voice DNA extraction, embedding indexing, and
-chapter summaries run in production.
+> **Branch must be `main`.** If you see "column X does not exist" or other
+> schema errors, check Render → Settings → Branch. It may point at a deleted
+> feature branch that stopped receiving commits silently.
 
-### 5. Frontend (Vercel)
+### 3. Frontend (Vercel)
 
-`frontend/vercel.json` is already configured (Vite build, SPA rewrites for
-React Router). Import the repo into Vercel, **set the root directory to
-`/frontend`**, and set:
+`frontend/vercel.json` is already configured (Vite build, SPA rewrites).
+Import the repo into Vercel, **set the root directory to `frontend`**, and add:
 
 ```env
-VITE_API_URL=https://your-api.up.railway.app/api
+VITE_API_URL=https://your-api.onrender.com/api
 ```
 
-Then add that Vercel URL to the API service's `CORS_ORIGINS` on Railway and
-redeploy the backend.
+Then add that Vercel URL to the backend's `CORS_ORIGINS` on Render and
+redeploy.
 
 ### Notes
 
-- `ENVIRONMENT=production` activates `validate_for_startup()` — the API will
-  refuse to start if `SECRET_KEY` is still the placeholder or if the active
-  `LLM_PROVIDER`'s API key is missing. This is intentional: fail at deploy time,
-  not on the first user request.
-- None of this affects local development. `docker-compose.yml`,
-  `backend/.env`, and `frontend/.env.local` are untouched by any of the above —
-  Railway and local dev are two independent targets for the same code.
-- Generation logs (`generation_logs` table) record cost/latency per request
-  regardless of environment — useful for sanity-checking token spend after a
-  few demo runs against the live Railway deployment.
+- **No Redis or worker service needed.** Background tasks run in-process via
+  FastAPI BackgroundTasks.
+- **Cold starts on free tier**: Render's free tier spins down after ~15 min
+  idle. Cold starts take 30–60s. Upgrade to Starter ($7/mo) to disable this.
+- `render.yaml` defines both services as a Blueprint — import this repo in
+  the Render dashboard and choose "Use render.yaml" to create both services
+  at once.
 
----
 
 ## Author
 

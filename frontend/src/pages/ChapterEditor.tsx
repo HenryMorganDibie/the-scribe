@@ -6,7 +6,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import CharacterCount from '@tiptap/extension-character-count'
 import {
   ArrowLeft, Sparkles, Wand2, BookOpen, ScrollText, CheckCircle2,
-  Send, Loader2, Download, Save,
+  Send, Loader2, Download, Save, PanelRight, X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api, streamSSE } from '@/lib/api'
@@ -44,6 +44,7 @@ export default function ChapterEditor() {
   const [generating, setGenerating] = useState(false)
   const [testimonies, setTestimonies] = useState<Testimony[]>([])
   const [voiceCheck, setVoiceCheck] = useState<{ score: number; grade: string; feedback: string } | null>(null)
+  const [mobileAiOpen, setMobileAiOpen] = useState(false)
   const [scriptureSuggestions, setScriptureSuggestions] = useState<any[]>([])
   const [tab, setTab] = useState<SidebarTab>('actions')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -315,9 +316,9 @@ export default function ChapterEditor() {
   const wordCount = editor?.storage.characterCount.words() || 0
 
   return (
-    <div className="flex h-screen">
+    <div className="flex flex-col md:flex-row h-screen">
       {/* Editor */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto min-w-0">
         <div className="max-w-3xl mx-auto px-8 py-8">
           <Link to={`/projects/${projectId}`} className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-4">
             <ArrowLeft size={14} /> Back to manuscript
@@ -368,11 +369,32 @@ export default function ChapterEditor() {
         </div>
       </div>
 
-      {/* Scribe AI Sidebar */}
-      <div className="w-96 border-l border-paper-300 bg-paper-200 flex flex-col">
+      {/* Mobile AI toggle button — floating, bottom-right */}
+      <button
+        onClick={() => setMobileAiOpen(true)}
+        className="fixed bottom-5 right-5 z-30 md:hidden btn-primary rounded-full p-3 shadow-lg flex items-center gap-2"
+      >
+        <Sparkles size={18} />
+        <span className="text-sm font-medium">AI Tools</span>
+      </button>
+
+      {/* Scribe AI Sidebar — desktop: fixed right panel; mobile: full-screen overlay */}
+      {mobileAiOpen && (
+        <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileAiOpen(false)} />
+      )}
+      <div className={`
+        bg-paper-200 flex flex-col border-paper-300
+        md:w-96 md:border-l md:relative md:translate-x-0
+        fixed inset-y-0 right-0 z-50 w-full max-w-sm border-l
+        transition-transform duration-200
+        ${mobileAiOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}
+      `}>
         <div className="p-4 border-b border-paper-300 flex items-center gap-2">
           <Sparkles size={18} className="text-seal" />
-          <h2 className="font-display text-display-xs font-semibold">The Scribe</h2>
+          <h2 className="font-display text-display-xs font-semibold flex-1">The Scribe</h2>
+          <button onClick={() => setMobileAiOpen(false)} className="md:hidden text-study-300 hover:text-study-700">
+            <X size={20} />
+          </button>
         </div>
 
         {/* Tabs */}

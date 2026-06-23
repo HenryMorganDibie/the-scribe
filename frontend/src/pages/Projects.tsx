@@ -41,7 +41,7 @@ export default function Projects() {
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="px-4 py-6 md:p-8 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
           <BookOpen size={24} className="text-seal" />
@@ -59,7 +59,7 @@ export default function Projects() {
             <label className="block text-sm text-study-400 mb-1.5">Title</label>
             <input required value={title} onChange={(e) => setTitle(e.target.value)} className="input-field w-full" placeholder="Called: Finding Your Voice in the Wilderness" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-study-400 mb-1.5">Genre</label>
               <select value={genre} onChange={(e) => setGenre(e.target.value)} className="input-field w-full capitalize">

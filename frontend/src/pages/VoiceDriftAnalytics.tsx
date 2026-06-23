@@ -64,7 +64,7 @@ export default function VoiceDriftAnalytics() {
   if (loading) return <div className="p-8 text-study-300">Loading drift analytics...</div>
   if (error || !data) {
     return (
-      <div className="p-8">
+      <div className="px-4 py-6 md:p-8">
         <p className="text-study-300 mb-3">Couldn't load analytics — this can happen right after a deploy.</p>
         <button onClick={load} className="btn-secondary text-sm">Try again</button>
       </div>
@@ -87,7 +87,7 @@ export default function VoiceDriftAnalytics() {
   const TrendIcon = data.trend ? trendCopy[data.trend].icon : null
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="px-4 py-6 md:p-8 max-w-5xl mx-auto">
       <Link to="/voice-profile" className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-4">
         <ArrowLeft size={14} /> Back to Voice DNA
       </Link>
@@ -108,7 +108,7 @@ export default function VoiceDriftAnalytics() {
       ) : (
         <>
           {/* Summary cards */}
-          <div className="grid md:grid-cols-3 gap-4 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
             <div className="card p-5">
               <p className="text-xs text-study-300 uppercase tracking-wide mb-1">Average match</p>
               <p className="font-display text-display-sm font-semibold text-seal">

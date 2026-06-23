@@ -116,7 +116,7 @@ export default function CompanionChat() {
 
   return (
     <div className="flex flex-col h-screen">
-      <div className="px-8 py-5 border-b border-paper-300 flex-shrink-0">
+      <div className="px-4 py-4 md:px-8 md:py-5 border-b border-paper-300 flex-shrink-0">
         <Link to={`/projects/${projectId}`} className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-2">
           <ArrowLeft size={14} /> Back to manuscript
         </Link>
@@ -129,7 +129,7 @@ export default function CompanionChat() {
         </p>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-8 py-6 max-w-3xl mx-auto w-full">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6 max-w-3xl mx-auto w-full">
         {messages.length === 0 && (
           <div className="space-y-3">
             <p className="text-sm text-study-300 italic mb-4">
@@ -182,7 +182,7 @@ export default function CompanionChat() {
         </div>
       </div>
 
-      <div className="border-t border-paper-300 px-8 py-4 flex-shrink-0">
+      <div className="border-t border-paper-300 px-4 py-3 md:px-8 md:py-4 flex-shrink-0">
         <div className="max-w-3xl mx-auto flex gap-2">
           <input
             value={input}

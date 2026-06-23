@@ -142,17 +142,17 @@ export default function ManuscriptStudio() {
   if (!project) return <div className="p-8 text-study-300">Manuscript not found.</div>
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="px-4 py-6 md:p-8 max-w-4xl mx-auto">
       <Link to="/projects" className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-4">
         <ArrowLeft size={14} /> All manuscripts
       </Link>
 
-      <div className="flex items-start justify-between mb-2">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-2">
         <div>
           <h1 className="font-display text-display-md font-semibold">{project.title}</h1>
           <span className="text-sm text-seal capitalize">{project.genre}</span>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Link to={`/projects/${project.id}/companion-chat`} className="btn-secondary flex items-center gap-2 text-sm">
             <MessageCircle size={16} /> Companion Chat
           </Link>
