@@ -38,7 +38,7 @@ export default function Sermons() {
   }
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const load = () => api.get('/sermons').then((r) => setSermons(r.data))
+  const load = () => api.get('/sermons').then((r) => setSermons(r.data)).catch(() => toast.error('Failed to refresh sermons'))
 
   useEffect(() => { load() }, [])
 

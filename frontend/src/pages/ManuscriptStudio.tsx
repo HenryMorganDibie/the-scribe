@@ -95,14 +95,19 @@ export default function ManuscriptStudio() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   const load = () => {
-    api.get(`/projects/${id}`).then((r) => setProject(r.data)).finally(() => setLoading(false))
+    api.get(`/projects/${id}`)
+      .then((r) => setProject(r.data))
+      .catch(() => toast.error('Failed to load manuscript'))
+      .finally(() => setLoading(false))
   }
 
   useEffect(load, [id])
 
   const handleAddChapter = async (e: React.FormEvent) => {
     e.preventDefault()
-    const nextNumber = (project?.chapters.length || 0) + 1
+    const nextNumber = project?.chapters.length
+      ? Math.max(...project.chapters.map((c) => c.chapter_number)) + 1
+      : 1
     try {
       await api.post(`/projects/${id}/chapters`, {
         title: chTitle,

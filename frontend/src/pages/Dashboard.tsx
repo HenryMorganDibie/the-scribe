@@ -43,7 +43,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      api.get('/projects').then((r) => setProjects(r.data)),
+      api.get('/projects').then((r) => setProjects(r.data)).catch(() => setProjects([])),
       api.get('/voice-profile').then((r) => setProfile(r.data)).catch(() => null),
     ]).finally(() => setLoading(false))
   }, [])
@@ -52,7 +52,7 @@ export default function Dashboard() {
     <div className="px-4 py-6 md:p-8 max-w-6xl mx-auto">
       <div className="mb-8">
         <h1 className="font-display text-display-md font-semibold mb-1">
-          {getGreeting()}, {user?.full_name?.split(' ')[0]}
+          {getGreeting()}, {user?.full_name?.split(' ')[0] || 'there'}
         </h1>
         <p className="text-study-300">Your voice is being honed. Here's where things stand.</p>
       </div>
@@ -93,8 +93,8 @@ export default function Dashboard() {
                 <div>
                   <span className="text-xs text-study-300 uppercase tracking-wide">Signature Phrases</span>
                   <div className="flex flex-wrap gap-2 mt-1.5">
-                    {profile.signature_phrases.slice(0, 6).map((p) => (
-                      <span key={p} className="text-xs bg-seal-50 border border-seal-200 text-seal-400 rounded-full px-3 py-1">
+                    {profile.signature_phrases.slice(0, 6).map((p, i) => (
+                      <span key={`${p}-${i}`} className="text-xs bg-seal-50 border border-seal-200 text-seal-400 rounded-full px-3 py-1">
                         "{p}"
                       </span>
                     ))}

@@ -74,7 +74,7 @@ export default function VoiceProfile() {
   useEffect(() => {
     Promise.all([
       api.get('/voice-profile').then((r) => setProfile(r.data)).catch(() => null),
-      api.get('/voice-profile/timeline').then((r) => setTimeline(r.data)).catch(() => []),
+      api.get('/voice-profile/timeline').then((r) => setTimeline(r.data)).catch(() => setTimeline([])),
     ]).finally(() => setLoading(false))
   }, [])
 
@@ -128,7 +128,7 @@ export default function VoiceProfile() {
                 value={editPhrases}
                 onChange={(e) => setEditPhrases(e.target.value)}
                 className="input-field w-full h-32 resize-none text-sm font-mono"
-                placeholder={"What if\nLet that sink in\nThere are seasons in life"}
+                placeholder="What if • Let that sink in • There are seasons in life"
               />
             </div>
             <div className="flex gap-2 justify-end">
@@ -181,8 +181,8 @@ export default function VoiceProfile() {
             <div className="lg:col-span-3 card p-6">
               <h2 className="font-display text-display-xs font-semibold mb-3">Signature Phrases</h2>
               <div className="flex flex-wrap gap-2">
-                {profile.signature_phrases.map((p) => (
-                  <span key={p} className="text-sm bg-seal-50 border border-seal-200 text-seal-400 rounded-full px-3 py-1.5">
+                {profile.signature_phrases.map((p, i) => (
+                  <span key={`${p}-${i}`} className="text-sm bg-seal-50 border border-seal-200 text-seal-400 rounded-full px-3 py-1.5">
                     "{p}"
                   </span>
                 ))}

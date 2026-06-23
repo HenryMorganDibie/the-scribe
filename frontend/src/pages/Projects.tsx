@@ -66,7 +66,7 @@ export default function Projects() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    api.get('/projects').then((r) => setProjects(r.data)).finally(() => setLoading(false))
+    api.get('/projects').then((r) => setProjects(r.data)).catch(() => toast.error('Failed to load manuscripts')).finally(() => setLoading(false))
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -108,7 +108,7 @@ export default function Projects() {
             </div>
             <div>
               <label className="block text-sm text-study-400 mb-1.5">Target Chapters</label>
-              <input type="number" min={1} max={50} value={targetChapters} onChange={(e) => setTargetChapters(parseInt(e.target.value))} className="input-field w-full" />
+              <input type="number" min={1} max={50} value={targetChapters} onChange={(e) => setTargetChapters(parseInt(e.target.value, 10) || 1)} className="input-field w-full" />
             </div>
           </div>
           <div>
@@ -134,7 +134,7 @@ export default function Projects() {
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setEditingProject(null)} className="btn-secondary">Cancel</button>
-              <button onClick={saveEdit} className="btn-primary">Save changes</button>
+              <button onClick={saveEdit} disabled={!editTitle.trim()} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">Save changes</button>
             </div>
           </div>
         </div>

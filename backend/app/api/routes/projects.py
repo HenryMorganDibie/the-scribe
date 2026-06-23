@@ -156,6 +156,19 @@ async def get_chapter(project_id: str, chapter_id: str, current_user: User = Dep
     return chapter
 
 
+# NOTE: This route MUST be defined before PUT /{chapter_id} so FastAPI does not
+# match the literal string "reorder" as a chapter_id path parameter.
+@router.put("/projects/{project_id}/chapters/reorder")
+async def reorder_chapters(project_id: str, body: ReorderRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    for i, chapter_id in enumerate(body.order):
+        result = await db.execute(select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id))
+        chapter = result.scalar_one_or_none()
+        if chapter:
+            chapter.position = i
+    await db.commit()
+    return {"reordered": True}
+
+
 @router.put("/projects/{project_id}/chapters/{chapter_id}")
 async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -180,17 +193,6 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
         fire_background_job(background_tasks, index_chapter_task, chapter_id, job_name="index_chapter")
 
     return {"updated": True}
-
-
-@router.put("/projects/{project_id}/chapters/reorder")
-async def reorder_chapters(project_id: str, body: ReorderRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    for i, chapter_id in enumerate(body.order):
-        result = await db.execute(select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id))
-        chapter = result.scalar_one_or_none()
-        if chapter:
-            chapter.position = i
-    await db.commit()
-    return {"reordered": True}
 
 
 @router.delete("/projects/{project_id}/chapters/{chapter_id}", status_code=204)
