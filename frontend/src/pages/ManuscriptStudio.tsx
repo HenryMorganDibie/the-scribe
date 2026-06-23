@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Plus, GripVertical, FileText, Download, ArrowLeft, X, MessageCircle } from 'lucide-react'
+import { Plus, GripVertical, FileText, Download, ArrowLeft, X, MessageCircle, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent,
@@ -36,7 +36,7 @@ const statusColors: Record<string, string> = {
   complete: 'status-complete',
 }
 
-function SortableChapter({ chapter, projectId }: { chapter: Chapter; projectId: string }) {
+function SortableChapter({ chapter, projectId, onDelete }: { chapter: Chapter; projectId: string; onDelete: (id: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: chapter.id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }
 
@@ -58,6 +58,13 @@ function SortableChapter({ chapter, projectId }: { chapter: Chapter; projectId: 
       <span className={`status-tag ${statusColors[chapter.status] || statusColors.draft}`}>
         {chapter.status.replace('_', ' ')}
       </span>
+      <button
+        onClick={(e) => { e.preventDefault(); onDelete(chapter.id) }}
+        className="p-1.5 text-study-300 hover:text-red-600 hover:bg-red-50 rounded"
+        title="Delete chapter"
+      >
+        <Trash2 size={14} />
+      </button>
     </div>
   )
 }
@@ -71,6 +78,19 @@ export default function ManuscriptStudio() {
   const [chIntent, setChIntent] = useState('')
   const [exporting, setExporting] = useState(false)
   const navigate = useNavigate()
+
+  const handleDeleteChapter = async (chapterId: string) => {
+    if (!project) return
+    const ch = project.chapters.find((c) => c.id === chapterId)
+    if (!confirm(`Delete "${ch?.title || 'this chapter'}"? This cannot be undone.`)) return
+    try {
+      await api.delete(`/projects/${id}/chapters/${chapterId}`)
+      setProject((prev) => prev ? { ...prev, chapters: prev.chapters.filter((c) => c.id !== chapterId) } : prev)
+      toast.success('Chapter deleted')
+    } catch {
+      toast.error('Failed to delete chapter')
+    }
+  }
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
@@ -192,7 +212,7 @@ export default function ManuscriptStudio() {
           <SortableContext items={project.chapters.map((c) => c.id)} strategy={verticalListSortingStrategy}>
             <div className="space-y-2">
               {project.chapters.map((ch) => (
-                <SortableChapter key={ch.id} chapter={ch} projectId={project.id} />
+                <SortableChapter key={ch.id} chapter={ch} projectId={project.id} onDelete={handleDeleteChapter} />
               ))}
             </div>
           </SortableContext>

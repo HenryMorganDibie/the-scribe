@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Feather, GitCommit, TrendingUp, TrendingDown, Minus, BookOpen, Activity } from 'lucide-react'
+import { Feather, GitCommit, TrendingUp, TrendingDown, Minus, BookOpen, Activity, Pencil } from 'lucide-react'
 import { api } from '@/lib/api'
+import toast from 'react-hot-toast'
 
 interface VoiceProfileData {
   theological_lens?: string
@@ -42,6 +43,33 @@ export default function VoiceProfile() {
   const [profile, setProfile] = useState<VoiceProfileData | null>(null)
   const [timeline, setTimeline] = useState<VoiceVersion[]>([])
   const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [editSummary, setEditSummary] = useState('')
+  const [editTranslation, setEditTranslation] = useState('')
+  const [editPhrases, setEditPhrases] = useState('')
+
+  const startEdit = () => {
+    setEditSummary(profile?.voice_summary || '')
+    setEditTranslation(profile?.preferred_translation || 'NKJV')
+    setEditPhrases((profile?.signature_phrases || []).join('\n'))
+    setEditing(true)
+  }
+
+  const saveEdit = async () => {
+    try {
+      const phrases = editPhrases.split('\n').map((p) => p.trim()).filter(Boolean)
+      await api.put('/voice-profile', {
+        voice_summary: editSummary,
+        preferred_translation: editTranslation,
+        signature_phrases: phrases,
+      })
+      setProfile((prev) => prev ? { ...prev, voice_summary: editSummary, preferred_translation: editTranslation, signature_phrases: phrases } : prev)
+      setEditing(false)
+      toast.success('Voice profile updated')
+    } catch {
+      toast.error('Failed to save')
+    }
+  }
 
   useEffect(() => {
     Promise.all([
@@ -61,10 +89,55 @@ export default function VoiceProfile() {
           <Feather size={24} className="text-seal" />
           <h1 className="font-display text-display-md font-semibold">Voice DNA</h1>
         </div>
-        <Link to="/voice-profile/drift-analytics" className="btn-secondary flex items-center gap-2 text-sm">
-          <Activity size={16} /> Drift Analytics
-        </Link>
+        <div className="flex gap-2">
+          {profile?.voice_summary && (
+            <button onClick={startEdit} className="btn-secondary flex items-center gap-2 text-sm">
+              <Pencil size={14} /> Edit Voice
+            </button>
+          )}
+          <Link to="/voice-profile/drift-analytics" className="btn-secondary flex items-center gap-2 text-sm">
+            <Activity size={16} /> Drift Analytics
+          </Link>
+        </div>
       </div>
+
+      {/* Edit modal */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-paper rounded-xl p-6 w-full max-w-lg space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
+            <h2 className="font-display text-display-xs font-semibold">Edit Voice Profile</h2>
+            <div>
+              <label className="block text-sm text-study-400 mb-1.5">Ghost Brief (voice summary)</label>
+              <textarea
+                value={editSummary}
+                onChange={(e) => setEditSummary(e.target.value)}
+                className="input-field w-full h-32 resize-none text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-study-400 mb-1.5">Preferred Bible Translation</label>
+              <select value={editTranslation} onChange={(e) => setEditTranslation(e.target.value)} className="input-field w-full">
+                {['NKJV', 'KJV', 'NIV', 'ESV', 'NLT', 'NASB', 'AMP'].map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-study-400 mb-1.5">Signature Phrases (one per line)</label>
+              <textarea
+                value={editPhrases}
+                onChange={(e) => setEditPhrases(e.target.value)}
+                className="input-field w-full h-32 resize-none text-sm font-mono"
+                placeholder={"What if\nLet that sink in\nThere are seasons in life"}
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditing(false)} className="btn-secondary">Cancel</button>
+              <button onClick={saveEdit} className="btn-primary">Save changes</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!profile?.voice_summary ? (
         <div className="bg-seal-50 border border-seal-200 rounded-lg p-6 text-seal-500">

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, BookOpen, X } from 'lucide-react'
+import { Plus, BookOpen, X, Trash2, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
 
@@ -18,6 +18,46 @@ const GENRES = ['teaching', 'devotional', 'prophetic', 'memoir']
 export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editTheme, setEditTheme] = useState('')
+
+  const handleDelete = async (e: React.MouseEvent, id: string, title: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!confirm(`Delete "${title}"? This will remove all chapters. This cannot be undone.`)) return
+    setDeletingId(id)
+    try {
+      await api.delete(`/projects/${id}`)
+      setProjects((prev) => prev.filter((p) => p.id !== id))
+      toast.success('Manuscript deleted')
+    } catch {
+      toast.error('Failed to delete')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const startEdit = (e: React.MouseEvent, project: Project) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setEditingProject(project)
+    setEditTitle(project.title)
+    setEditTheme(project.theme || '')
+  }
+
+  const saveEdit = async () => {
+    if (!editingProject || !editTitle.trim()) return
+    try {
+      await api.put(`/projects/${editingProject.id}`, { title: editTitle, theme: editTheme })
+      setProjects((prev) => prev.map((p) => p.id === editingProject.id ? { ...p, title: editTitle, theme: editTheme } : p))
+      setEditingProject(null)
+      toast.success('Manuscript updated')
+    } catch {
+      toast.error('Failed to update')
+    }
+  }
   const [showForm, setShowForm] = useState(false)
   const [title, setTitle] = useState('')
   const [genre, setGenre] = useState('teaching')
@@ -79,6 +119,27 @@ export default function Projects() {
         </form>
       )}
 
+      {/* Edit modal */}
+      {editingProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-paper rounded-xl p-6 w-full max-w-md space-y-4 shadow-xl">
+            <h2 className="font-display text-display-xs font-semibold">Edit Manuscript</h2>
+            <div>
+              <label className="block text-sm text-study-400 mb-1.5">Title</label>
+              <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-sm text-study-400 mb-1.5">Core Theme</label>
+              <textarea value={editTheme} onChange={(e) => setEditTheme(e.target.value)} className="input-field w-full h-20 resize-none" />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditingProject(null)} className="btn-secondary">Cancel</button>
+              <button onClick={saveEdit} className="btn-primary">Save changes</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-study-300">Loading...</div>
       ) : projects.length === 0 ? (
@@ -86,8 +147,25 @@ export default function Projects() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((p) => (
-            <Link key={p.id} to={`/projects/${p.id}`} className="card p-5 hover:border-seal/50">
-              <h3 className="font-display text-lg font-semibold mb-1">{p.title}</h3>
+            <Link key={p.id} to={`/projects/${p.id}`} className="card p-5 hover:border-seal/50 relative group">
+              <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={(e) => startEdit(e, p)}
+                  className="p-1.5 rounded hover:bg-paper-300 text-study-300 hover:text-study-700"
+                  title="Edit"
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  onClick={(e) => handleDelete(e, p.id, p.title)}
+                  disabled={deletingId === p.id}
+                  className="p-1.5 rounded hover:bg-red-50 text-study-300 hover:text-red-600"
+                  title="Delete"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              <h3 className="font-display text-lg font-semibold mb-1 pr-14">{p.title}</h3>
               <span className="text-xs text-seal capitalize">{p.genre}</span>
               {p.theme && <p className="text-sm text-study-300 mt-2 line-clamp-2">{p.theme}</p>}
               <div className="mt-3 text-xs text-ink0">{p.target_chapters} chapters target</div>

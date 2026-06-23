@@ -28,6 +28,13 @@ function cadenceLabel(score?: number) {
   return 'Flowing & Expansive'
 }
 
+function getGreeting() {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 17) return 'Good afternoon'
+  return 'Good evening'
+}
+
 export default function Dashboard() {
   const { user } = useAuthStore()
   const [projects, setProjects] = useState<Project[]>([])
@@ -45,7 +52,7 @@ export default function Dashboard() {
     <div className="px-4 py-6 md:p-8 max-w-6xl mx-auto">
       <div className="mb-8">
         <h1 className="font-display text-display-md font-semibold mb-1">
-          Welcome back, {user?.full_name?.split(' ')[0]}
+          {getGreeting()}, {user?.full_name?.split(' ')[0]}
         </h1>
         <p className="text-study-300">Your voice is being honed. Here's where things stand.</p>
       </div>

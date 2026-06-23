@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, FileText, Loader2 } from 'lucide-react'
+import { Upload, FileText, Loader2 , Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
 
@@ -21,6 +21,21 @@ export default function Sermons() {
   const [text, setText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const handleDelete = async (id: string, title: string) => {
+    if (!confirm(`Delete "${title}"?`)) return
+    setDeletingId(id)
+    try {
+      await api.delete(`/sermons/${id}`)
+      setSermons((prev) => prev.filter((s) => s.id !== id))
+      toast.success('Sermon deleted')
+    } catch {
+      toast.error('Failed to delete')
+    } finally {
+      setDeletingId(null)
+    }
+  }
   const fileRef = useRef<HTMLInputElement>(null)
 
   const load = () => api.get('/sermons').then((r) => setSermons(r.data))
@@ -123,6 +138,7 @@ export default function Sermons() {
                 <p className="text-xs text-study-300 uppercase">{s.source_type}</p>
               </div>
             </div>
+            <div className="flex items-center gap-3">
             <div className="text-right text-sm">
               {ACTIVE.includes(s.status) ? (
                 <span className="flex items-center gap-1.5 text-study-300">
@@ -135,6 +151,15 @@ export default function Sermons() {
                   +{s.phrases_added} phrases · {s.testimonies_suggested} stories
                 </span>
               )}
+            </div>
+            <button
+              onClick={() => handleDelete(s.id, s.title)}
+              disabled={deletingId === s.id}
+              className="p-1.5 text-study-300 hover:text-red-600 hover:bg-red-50 rounded flex-shrink-0"
+              title="Delete"
+            >
+              <Trash2 size={16} />
+            </button>
             </div>
           </div>
         ))}
