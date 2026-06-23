@@ -52,6 +52,7 @@ export default function ChapterEditor() {
   const [chatStreaming, setChatStreaming] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
+  const lastIndexedHtmlRef = useRef<string>('')
 
   const editor = useEditor({
     extensions: [
@@ -84,6 +85,9 @@ export default function ChapterEditor() {
       setTestimonies(testRes.data)
       if (editor && chRes.data.content) {
         editor.commands.setContent(chRes.data.content)
+        lastIndexedHtmlRef.current = chRes.data.content
+      } else if (editor) {
+        lastIndexedHtmlRef.current = ''
       }
       if (chRes.data.voice_match_score) {
         setVoiceCheck({
@@ -104,10 +108,40 @@ export default function ChapterEditor() {
     if (editor) load()
   }, [editor, load])
 
+  useEffect(() => {
+    return () => {
+      if (editor) {
+        const content = editor.getHTML()
+        if (content !== lastIndexedHtmlRef.current) {
+          const wordCount = editor.storage.characterCount.words()
+          const token = localStorage.getItem('scribe_token')
+          const url = api.defaults.baseURL + `/projects/${projectId}/chapters/${chapterId}`
+          fetch(url, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: token ? `Bearer ${token}` : '',
+            },
+            body: JSON.stringify({
+              content,
+              word_count: wordCount,
+              trigger_indexing: true,
+            }),
+            keepalive: true,
+          }).catch(() => {})
+        }
+      }
+    }
+  }, [projectId, chapterId, editor])
+
   const autoSave = async (content: string, wordCount: number) => {
     setSaving(true)
     try {
-      await api.put(`/projects/${projectId}/chapters/${chapterId}`, { content, word_count: wordCount })
+      await api.put(`/projects/${projectId}/chapters/${chapterId}`, {
+        content,
+        word_count: wordCount,
+        trigger_indexing: false,
+      })
     } catch {
       // silent
     } finally {
@@ -118,11 +152,15 @@ export default function ChapterEditor() {
   const manualSave = async () => {
     if (!editor) return
     setSaving(true)
+    const content = editor.getHTML()
+    const wordCount = editor.storage.characterCount.words()
     try {
       await api.put(`/projects/${projectId}/chapters/${chapterId}`, {
-        content: editor.getHTML(),
-        word_count: editor.storage.characterCount.words(),
+        content,
+        word_count: wordCount,
+        trigger_indexing: true,
       })
+      lastIndexedHtmlRef.current = content
       toast.success('Saved')
     } catch {
       toast.error('Save failed')
@@ -148,7 +186,14 @@ export default function ChapterEditor() {
         },
         () => {
           setGenerating(false)
-          autoSave(editor.getHTML(), editor.storage.characterCount.words())
+          const content = editor.getHTML()
+          const wordCount = editor.storage.characterCount.words()
+          api.put(`/projects/${projectId}/chapters/${chapterId}`, {
+            content,
+            word_count: wordCount,
+            trigger_indexing: true,
+          }).catch(() => {})
+          lastIndexedHtmlRef.current = content
           toast.success('Chapter draft generated')
         },
         (err) => {

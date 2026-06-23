@@ -49,6 +49,14 @@ async def update_voice_profile(
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(profile, k, v)
 
+    # Re-embed and cache the voice summary if it changes
+    if body.voice_summary is not None:
+        from app.services.voice.embeddings import embedding_service
+        if body.voice_summary:
+            profile.voice_summary_embedding = await embedding_service.embed(body.voice_summary)
+        else:
+            profile.voice_summary_embedding = None
+
     await db.commit()
 
     # Snapshot voice version on manual edit

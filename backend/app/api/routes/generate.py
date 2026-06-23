@@ -203,7 +203,7 @@ async def voice_check(
     db: AsyncSession = Depends(get_db),
 ):
     profile = await _get_profile(current_user.id, db)
-    analysis = await analyze_voice_drift(body.text, profile)
+    analysis = await analyze_voice_drift(body.text, profile, db)
     score = analysis["overall_score"]
 
     # Also get LLM feedback on what's off

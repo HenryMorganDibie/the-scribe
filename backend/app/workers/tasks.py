@@ -31,7 +31,7 @@ from sqlalchemy import select
 from app.db.session import AsyncSessionLocal
 from app.models import VoiceProfile, Chapter
 from app.services.ai.generation import extract_voice_dna, generate_chapter_summary
-from app.services.voice.embeddings import index_writing_sample, index_testimony, index_chapter
+from app.services.voice.embeddings import index_writing_sample, index_testimony, index_chapter, embedding_service
 from app.services.voice.timeline import snapshot_voice
 
 import structlog
@@ -67,6 +67,10 @@ async def extract_voice_dna_task(user_id: str) -> None:
                         existing[s["ref"]] = s
                 profile.anchor_scriptures = list(existing.values())
 
+                # Cache the voice summary embedding
+                if profile.voice_summary:
+                    profile.voice_summary_embedding = await embedding_service.embed(profile.voice_summary)
+
                 await db.commit()
 
                 await snapshot_voice(
@@ -90,6 +94,15 @@ async def index_writing_samples_task(user_id: str) -> None:
             if not profile or not profile.writing_samples:
                 return
 
+            from sqlalchemy import delete
+            from app.models import DocumentEmbedding
+            await db.execute(
+                delete(DocumentEmbedding).where(
+                    DocumentEmbedding.user_id == user_id,
+                    DocumentEmbedding.doc_type == "writing_sample"
+                )
+            )
+
             for sample in profile.writing_samples:
                 await index_writing_sample(user_id, sample, db)
     except Exception:
@@ -100,6 +113,15 @@ async def index_testimony_task(user_id: str, testimony_id: str, story: str) -> N
     """Index a single testimony into pgvector for retrieval."""
     try:
         async with AsyncSessionLocal() as db:
+            from sqlalchemy import delete
+            from app.models import DocumentEmbedding
+            await db.execute(
+                delete(DocumentEmbedding).where(
+                    DocumentEmbedding.user_id == user_id,
+                    DocumentEmbedding.doc_type == "testimony",
+                    DocumentEmbedding.source_id == testimony_id
+                )
+            )
             await index_testimony(user_id, testimony_id, story, db)
     except Exception:
         logger.exception("index_testimony_task_failed", user_id=user_id, testimony_id=testimony_id)

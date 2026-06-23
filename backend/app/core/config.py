@@ -18,7 +18,7 @@ import json
 import sys
 
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, ConfigDict
 
 
 def normalize_db_url(url: str) -> str:
@@ -147,9 +147,7 @@ class Settings(BaseSettings):
                     "Invalid configuration for production startup: " + joined
                 )
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = ConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()

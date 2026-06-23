@@ -68,6 +68,7 @@ class VoiceProfile(Base):
     cadence_score: Mapped[Optional[float]] = mapped_column(Float)  # 0.0 (punchy) → 1.0 (flowing)
     style_tags: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
     voice_summary: Mapped[Optional[str]] = mapped_column(Text)  # The "ghost brief" — 300-word description
+    voice_summary_embedding: Mapped[Optional[List[float]]] = mapped_column(Vector(384), nullable=True)
     dna_narrative: Mapped[Optional[str]] = mapped_column(Text)  # cached Ministry DNA Report narrative
 
     # Writing samples (raw text — embeddings stored separately)

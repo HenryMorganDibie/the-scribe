@@ -111,6 +111,7 @@ class ChapterUpdate(BaseModel):
     content: Optional[str] = None
     status: Optional[str] = None
     word_count: Optional[int] = None
+    trigger_indexing: Optional[bool] = False
 
 
 class ReorderRequest(BaseModel):
@@ -164,14 +165,16 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    for k, v in body.model_dump(exclude_none=True).items():
+    update_data = body.model_dump(exclude_none=True)
+    update_data.pop("trigger_indexing", None)
+    for k, v in update_data.items():
         setattr(chapter, k, v)
 
     await db.commit()
 
     # Schedule summary generation + companion-chat re-indexing if content
-    # was updated — both run after response is sent, independently.
-    if body.content:
+    # was updated AND trigger_indexing was explicitly requested.
+    if body.content and body.trigger_indexing:
         from app.workers.tasks import generate_chapter_summary_task, index_chapter_task
         fire_background_job(background_tasks, generate_chapter_summary_task, chapter_id, job_name="generate_chapter_summary")
         fire_background_job(background_tasks, index_chapter_task, chapter_id, job_name="index_chapter")
