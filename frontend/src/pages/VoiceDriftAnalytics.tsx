@@ -71,6 +71,24 @@ export default function VoiceDriftAnalytics() {
     )
   }
 
+  if (!data.has_data) {
+    return (
+      <div className="p-8 max-w-3xl mx-auto">
+        <div className="bg-seal-50 border border-seal-100 rounded-lg p-6 text-seal-500">
+          {data.message}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Link to="/projects" className="btn-primary text-sm">
+            Open manuscripts to run Check My Voice
+          </Link>
+          <button onClick={load} className="btn-secondary text-sm">
+            Refresh analytics
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   const chartData = data.timeline.map((t, i) => ({
     check: `#${i + 1}`,
     score: Math.round(t.score * 100),

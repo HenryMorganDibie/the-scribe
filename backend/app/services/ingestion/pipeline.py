@@ -57,6 +57,8 @@ async def process_sermon(sermon_id: str, source_type: str, file_bytes: bytes | N
                 merged = merge_voice_dna(profile, dna)
                 sermon.phrases_added = merged["phrases_added"]
                 profile.dna_narrative = None  # invalidate cached report narrative
+                if dna.get("voice_summary"):
+                    profile.voice_summary_embedding = await _embedding_service.embed(profile.voice_summary)
                 await db.commit()
                 await snapshot_voice(
                     profile=profile, trigger="sermon_ingested", db=db,

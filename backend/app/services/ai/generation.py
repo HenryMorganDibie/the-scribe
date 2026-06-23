@@ -388,7 +388,7 @@ def _text_cadence_score(text: str) -> float:
     return round(min(1.0, max(0.0, (avg_words - 6) / 22)), 3)
 
 
-async def analyze_voice_drift(content: str, profile: VoiceProfile) -> dict:
+async def analyze_voice_drift(content: str, profile: VoiceProfile, db: Optional[AsyncSession] = None) -> dict:
     """
     Multi-dimensional voice match analysis, broken into the components Voice
     Drift Analytics displays: overall similarity, cadence match, signature
@@ -410,7 +410,16 @@ async def analyze_voice_drift(content: str, profile: VoiceProfile) -> dict:
     overall_score = 0.75
     if profile.voice_summary:
         content_embedding = await embedding_service.embed(content[:1000])
-        voice_embedding = await embedding_service.embed(profile.voice_summary)
+        
+        if profile.voice_summary_embedding is not None:
+            voice_embedding = profile.voice_summary_embedding
+        else:
+            voice_embedding = await embedding_service.embed(profile.voice_summary)
+            if db is not None:
+                profile.voice_summary_embedding = voice_embedding
+                db.add(profile)
+                await db.commit()
+
         import numpy as np
         a = np.array(content_embedding)
         b = np.array(voice_embedding)
