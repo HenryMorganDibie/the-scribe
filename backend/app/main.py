@@ -31,6 +31,20 @@ async def lifespan(app: FastAPI):
     print("[STARTUP] Entering FastAPI lifespan -- about to validate config...", flush=True)
     settings.validate_for_startup()
     print("[STARTUP] Config validated OK.", flush=True)
+
+    # Eagerly load the fastembed ONNX model so the first user doesn't pay the
+    # download/init cost (30-90s on a cold instance) during voice DNA extraction.
+    print("[STARTUP] Warming up embedding model...", flush=True)
+    try:
+        import asyncio
+        from app.services.voice.embeddings import _load_model
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _load_model)
+        print("[STARTUP] Embedding model ready.", flush=True)
+    except Exception as e:
+        # Non-fatal — embedding still works, just slower on first call
+        print(f"[STARTUP] Embedding model warmup failed (non-fatal): {e}", flush=True)
+
     logger.info(
         "the_scribe_api_starting",
         environment=settings.ENVIRONMENT,

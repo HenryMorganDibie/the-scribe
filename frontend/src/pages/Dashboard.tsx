@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Plus, BookOpen, Feather, ArrowRight, TrendingUp } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
+import toast from 'react-hot-toast'
 
 interface Project {
   id: string
@@ -40,6 +41,19 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [profile, setProfile] = useState<VoiceProfileData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [reprocessing, setReprocessing] = useState(false)
+
+  const handleReprocess = async () => {
+    setReprocessing(true)
+    try {
+      await api.post('/voice-profile/reprocess')
+      toast.success('Voice DNA re-queued — check back in 30 seconds')
+    } catch {
+      toast.error('Failed to re-queue — try again')
+    } finally {
+      setReprocessing(false)
+    }
+  }
 
   useEffect(() => {
     Promise.all([
@@ -74,8 +88,15 @@ export default function Dashboard() {
             <div className="text-study-300 text-sm">Loading...</div>
           ) : !profile?.voice_summary ? (
             <div className="bg-seal-50 border border-seal-200 rounded-lg p-4 text-sm text-seal-500">
-              Your Voice DNA is still being processed. This usually takes a minute or two after onboarding —
-              check back shortly.
+              <p>Your Voice DNA is still being processed. This usually takes a minute or two after onboarding —
+              check back shortly.</p>
+              <button
+                onClick={handleReprocess}
+                disabled={reprocessing}
+                className="mt-3 btn-secondary text-xs"
+              >
+                {reprocessing ? 'Re-queuing…' : 'Taking too long? Click to retry'}
+              </button>
             </div>
           ) : (
             <div className="space-y-4">
