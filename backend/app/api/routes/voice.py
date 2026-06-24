@@ -32,7 +32,16 @@ async def get_voice_profile(current_user: User = Depends(get_current_user), db: 
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Voice profile not found")
-    return profile
+    return {
+        "theological_lens": profile.theological_lens,
+        "signature_phrases": profile.signature_phrases or [],
+        "anchor_scriptures": profile.anchor_scriptures or [],
+        "cadence_score": profile.cadence_score,
+        "style_tags": profile.style_tags or [],
+        "voice_summary": profile.voice_summary,
+        "tone_preferences": profile.tone_preferences or [],
+        "preferred_translation": profile.preferred_translation,
+    }
 
 
 @router.put("/voice-profile")
@@ -93,6 +102,32 @@ async def dna_report(current_user: User = Depends(get_current_user), db: AsyncSe
 
 # ── Voice Evolution Timeline ──────────────────
 
+@router.post("/voice-profile/reprocess")
+async def reprocess_voice_dna(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Re-trigger Voice DNA extraction for users stuck on 'still being processed'.
+    Safe to call multiple times — already-extracted profiles will simply be refreshed.
+    """
+    result = await db.execute(select(VoiceProfile).where(VoiceProfile.user_id == current_user.id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Voice profile not found")
+    if not current_user.onboarded:
+        raise HTTPException(status_code=400, detail="Onboarding not complete")
+    if not profile.writing_samples:
+        raise HTTPException(status_code=400, detail="No writing samples to process")
+
+    from app.workers.tasks import extract_voice_dna_task, index_writing_samples_task
+    fire_background_job(background_tasks, extract_voice_dna_task, current_user.id, job_name="extract_voice_dna")
+    fire_background_job(background_tasks, index_writing_samples_task, current_user.id, job_name="index_writing_samples")
+
+    return {"reprocessing": True, "message": "Voice DNA extraction re-queued. Check back in 30 seconds."}
+
+
 @router.get("/voice-profile/timeline")
 async def voice_timeline(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     versions = await get_timeline(current_user.id, db)
@@ -148,7 +183,18 @@ async def list_testimonies(
         query = query.where(Testimony.status == status)
     query = query.order_by(Testimony.created_at.desc())
     result = await db.execute(query)
-    return result.scalars().all()
+    testimonies = result.scalars().all()
+    return [
+        {
+            "id": t.id,
+            "title": t.title,
+            "story": t.story,
+            "themes": t.themes or [],
+            "status": t.status,
+            "created_at": t.created_at,
+        }
+        for t in testimonies
+    ]
 
 
 @router.post("/testimonies", status_code=201)
