@@ -9,6 +9,7 @@ from typing import Optional, List
 from app.db.session import get_db
 from app.models import User, Project, Chapter
 from app.core.security import get_current_user
+from app.api.ownership import get_owned_chapter, get_owned_project
 from app.utils.jobs import fire_background_job
 from app.services.ai.companion_chat import companion_chat_stream, save_message, get_history
 
@@ -51,12 +52,14 @@ async def create_project(body: ProjectCreate, current_user: User = Depends(get_c
 
 @router.get("/projects/{project_id}")
 async def get_project(project_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await get_owned_project(project_id, current_user.id, db)
 
-    ch_result = await db.execute(select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.position))
+    ch_result = await db.execute(
+        select(Chapter).where(
+            Chapter.project_id == project_id,
+            Chapter.user_id == current_user.id,
+        ).order_by(Chapter.position)
+    )
     chapters = ch_result.scalars().all()
 
     return {
@@ -70,10 +73,7 @@ async def get_project(project_id: str, current_user: User = Depends(get_current_
 
 @router.put("/projects/{project_id}")
 async def update_project(project_id: str, body: ProjectUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await get_owned_project(project_id, current_user.id, db)
 
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(project, k, v)
@@ -83,10 +83,7 @@ async def update_project(project_id: str, body: ProjectUpdate, current_user: Use
 
 @router.delete("/projects/{project_id}", status_code=204)
 async def delete_project(project_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await get_owned_project(project_id, current_user.id, db)
     await db.delete(project)
     await db.commit()
 
@@ -120,6 +117,7 @@ class ReorderRequest(BaseModel):
 
 @router.get("/projects/{project_id}/chapters")
 async def list_chapters(project_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await get_owned_project(project_id, current_user.id, db)
     result = await db.execute(
         select(Chapter).where(Chapter.project_id == project_id, Chapter.user_id == current_user.id).order_by(Chapter.position)
     )
@@ -128,8 +126,15 @@ async def list_chapters(project_id: str, current_user: User = Depends(get_curren
 
 @router.post("/projects/{project_id}/chapters", status_code=201)
 async def create_chapter(project_id: str, body: ChapterCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await get_owned_project(project_id, current_user.id, db)
+
     # Get max position
-    result = await db.execute(select(Chapter).where(Chapter.project_id == project_id))
+    result = await db.execute(
+        select(Chapter).where(
+            Chapter.project_id == project_id,
+            Chapter.user_id == current_user.id,
+        )
+    )
     existing = result.scalars().all()
     position = len(existing)
 
@@ -147,36 +152,53 @@ async def create_chapter(project_id: str, body: ChapterCreate, current_user: Use
 
 @router.get("/projects/{project_id}/chapters/{chapter_id}")
 async def get_chapter(project_id: str, chapter_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id, Chapter.user_id == current_user.id)
+    await get_owned_project(project_id, current_user.id, db)
+    return await get_owned_chapter(
+        chapter_id,
+        current_user.id,
+        db,
+        project_id=project_id,
     )
-    chapter = result.scalar_one_or_none()
-    if not chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found")
-    return chapter
 
 
 # NOTE: This route MUST be defined before PUT /{chapter_id} so FastAPI does not
 # match the literal string "reorder" as a chapter_id path parameter.
 @router.put("/projects/{project_id}/chapters/reorder")
 async def reorder_chapters(project_id: str, body: ReorderRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    for i, chapter_id in enumerate(body.order):
-        result = await db.execute(select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id))
-        chapter = result.scalar_one_or_none()
-        if chapter:
-            chapter.position = i
+    await get_owned_project(project_id, current_user.id, db)
+    result = await db.execute(
+        select(Chapter).where(
+            Chapter.project_id == project_id,
+            Chapter.user_id == current_user.id,
+        )
+    )
+    chapters = result.scalars().all()
+    chapters_by_id = {chapter.id: chapter for chapter in chapters}
+
+    # Require one occurrence of every chapter in this project. Besides keeping
+    # positions coherent, this prevents foreign chapter IDs from being used as
+    # a cross-tenant write primitive.
+    if len(body.order) != len(set(body.order)) or set(body.order) != set(chapters_by_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Order must contain every project chapter exactly once",
+        )
+
+    for position, chapter_id in enumerate(body.order):
+        chapters_by_id[chapter_id].position = position
     await db.commit()
     return {"reordered": True}
 
 
 @router.put("/projects/{project_id}/chapters/{chapter_id}")
 async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id, Chapter.user_id == current_user.id)
+    await get_owned_project(project_id, current_user.id, db)
+    chapter = await get_owned_chapter(
+        chapter_id,
+        current_user.id,
+        db,
+        project_id=project_id,
     )
-    chapter = result.scalar_one_or_none()
-    if not chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found")
 
     update_data = body.model_dump(exclude_none=True)
     update_data.pop("trigger_indexing", None)
@@ -197,12 +219,13 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
 
 @router.delete("/projects/{project_id}/chapters/{chapter_id}", status_code=204)
 async def delete_chapter(project_id: str, chapter_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id, Chapter.user_id == current_user.id)
+    await get_owned_project(project_id, current_user.id, db)
+    chapter = await get_owned_chapter(
+        chapter_id,
+        current_user.id,
+        db,
+        project_id=project_id,
     )
-    chapter = result.scalar_one_or_none()
-    if not chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found")
     await db.delete(chapter)
     await db.commit()
 
@@ -221,9 +244,7 @@ async def companion_chat_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await get_owned_project(project_id, current_user.id, db)
 
     messages = await get_history(project_id, db)
     return [
@@ -243,9 +264,7 @@ async def companion_chat(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Project).where(Project.id == project_id, Project.user_id == current_user.id))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await get_owned_project(project_id, current_user.id, db)
 
     history_msgs = await get_history(project_id, db)
     history = [{"role": m.role, "content": m.content} for m in history_msgs]

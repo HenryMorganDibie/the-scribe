@@ -9,19 +9,17 @@ from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Optional, List
 import json
-import time
 
 from app.db.session import get_db
-from app.models import User, VoiceProfile, Chapter, Project, Testimony, GenerationLog
+from app.models import User, VoiceProfile, Testimony, GenerationLog
 from app.core.security import get_current_user
+from app.api.ownership import get_owned_chapter, get_owned_project
 from app.services.ai.generation import (
     generate_chapter_stream,
-    score_voice_match,
     analyze_voice_drift,
     build_voice_brief,
-    get_chapter_memory,
 )
-from app.services.ai.llm_client import get_llm_client, estimate_cost
+from app.services.ai.llm_client import get_llm_client
 from app.core.config import settings
 
 router = APIRouter(prefix="/generate", tags=["generation"])
@@ -76,17 +74,10 @@ async def generate_chapter(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
+    project = await get_owned_project(chapter.project_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
 
-    result = await db.execute(select(Chapter).where(Chapter.id == body.chapter_id, Chapter.user_id == current_user.id))
-    chapter = result.scalar_one_or_none()
-    if not chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found")
-
-    result = await db.execute(select(Project).where(Project.id == chapter.project_id))
-    project = result.scalar_one_or_none()
-
-    start_time = time.time()
     log = GenerationLog(user_id=current_user.id, chapter_id=chapter.id, action="generate_chapter", model=settings.LLM_PROVIDER)
     db.add(log)
 
@@ -133,6 +124,7 @@ async def continue_writing(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
     voice_brief = await build_voice_brief(profile)
 
@@ -162,6 +154,7 @@ async def weave_story(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
 
     result = await db.execute(select(Testimony).where(Testimony.id == body.testimony_id, Testimony.user_id == current_user.id))
@@ -202,6 +195,7 @@ async def voice_check(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
     analysis = await analyze_voice_drift(body.text, profile, db)
     score = analysis["overall_score"]
@@ -229,10 +223,7 @@ Passage:
     # as a GenerationLog row so Voice Drift Analytics has historical trend
     # data to chart — previously this route updated the chapter but never
     # wrote a log row, so no trend could ever be computed.
-    result = await db.execute(select(Chapter).where(Chapter.id == body.chapter_id))
-    chapter = result.scalar_one_or_none()
-    if chapter:
-        chapter.voice_match_score = score
+    chapter.voice_match_score = score
 
     log = GenerationLog(
         user_id=current_user.id,
@@ -266,6 +257,7 @@ async def scripture_suggest(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
     anchor = [s["ref"] for s in (profile.anchor_scriptures or [])][:10]
     translation = profile.preferred_translation or "NKJV"
@@ -301,6 +293,7 @@ async def scribe_chat(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
     voice_brief = await build_voice_brief(profile)
 
