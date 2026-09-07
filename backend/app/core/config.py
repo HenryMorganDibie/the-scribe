@@ -56,14 +56,18 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str = ""
 
     # ── LLM provider ──────────────────────────────────────────────
-    # "anthropic" (production target) or "groq" (free tier, dev/demo)
+    # "anthropic" (production target) or "groq" (fast, cost-effective option)
     LLM_PROVIDER: str = "anthropic"
 
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
 
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
+
+    # Google Sign-In uses a public OAuth web-client ID in the browser. The
+    # backend verifies that every returned ID token was issued for this ID.
+    GOOGLE_CLIENT_ID: str = ""
 
     # ── Auth ──────────────────────────────────────────────────────
     SECRET_KEY: str = "change-me-in-production"

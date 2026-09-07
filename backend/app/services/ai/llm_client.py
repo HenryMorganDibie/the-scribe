@@ -3,8 +3,8 @@ Unified LLM client — supports Anthropic (Claude) and Groq as interchangeable
 providers behind one interface.
 
 Why: Anthropic gives the best quality (and is the production target), but Groq's
-free tier (Llama 3.3 70B / 70B versatile, etc.) is fast and free, which is useful
-for development iteration and live demos without burning API credits.
+GPT-OSS 120B option is fast and cost-effective for development iteration and
+live demos without burning Anthropic credits.
 
 Switch providers via LLM_PROVIDER env var: "anthropic" (default) or "groq".
 Both providers are exposed through the same async streaming interface, so the
@@ -134,7 +134,8 @@ def get_llm_client() -> LLMClient:
 # Cost tables (USD per token) — used for generation_logs.cost_usd
 COST_PER_TOKEN = {
     "anthropic": {"input": 0.000003, "output": 0.000015},   # claude-sonnet-4
-    "groq": {"input": 0.0, "output": 0.0},                  # free tier
+    # GPT-OSS 120B on Groq: $0.15 input / $0.60 output per million tokens.
+    "groq": {"input": 0.00000015, "output": 0.00000060},
 }
 
 

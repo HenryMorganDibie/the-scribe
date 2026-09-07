@@ -1,3 +1,6 @@
+import asyncio
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +24,40 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: dict
+
+
+class GoogleSignInRequest(BaseModel):
+    credential: str
+
+
+async def verify_google_credential(credential: str) -> dict:
+    """Validate a Google Identity Services ID token for this application."""
+    if not settings.GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status_code=503,
+            detail="Google sign-in is not configured",
+        )
+
+    def verify() -> dict:
+        from google.auth.transport import requests
+        from google.oauth2 import id_token
+
+        return id_token.verify_oauth2_token(
+            credential,
+            requests.Request(),
+            settings.GOOGLE_CLIENT_ID,
+        )
+
+    try:
+        claims = await asyncio.to_thread(verify)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid Google credential") from exc
+
+    email = claims.get("email")
+    email_verified = claims.get("email_verified")
+    if not email or email_verified not in (True, "true"):
+        raise HTTPException(status_code=401, detail="Google account email is not verified")
+    return claims
 
 
 @router.post("/signup", response_model=TokenResponse)
@@ -64,6 +101,45 @@ async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = 
     return TokenResponse(
         access_token=token,
         user={"id": user.id, "email": user.email, "full_name": user.full_name, "onboarded": user.onboarded},
+    )
+
+
+@router.post("/google", response_model=TokenResponse)
+async def google_sign_in(
+    body: GoogleSignInRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create or sign in an account from a verified Google ID token."""
+    claims = await verify_google_credential(body.credential)
+    email = claims["email"].strip().lower()
+
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+    if user is None:
+        # A random, unshared value prevents password login until a dedicated
+        # account-recovery flow is introduced, while satisfying the existing
+        # non-null password schema for a Google-only account.
+        user = User(
+            email=email,
+            full_name=claims.get("name") or email.split("@", 1)[0],
+            hashed_password=hash_password(secrets.token_urlsafe(32)),
+            onboarded=False,
+        )
+        db.add(user)
+        await db.flush()
+        db.add(VoiceProfile(user_id=user.id))
+        await db.commit()
+        await db.refresh(user)
+
+    token = create_access_token({"sub": user.id})
+    return TokenResponse(
+        access_token=token,
+        user={
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "onboarded": user.onboarded,
+        },
     )
 
 

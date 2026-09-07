@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { Plus, GripVertical, FileText, Download, ArrowLeft, X, MessageCircle, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
@@ -77,8 +77,6 @@ export default function ManuscriptStudio() {
   const [chTitle, setChTitle] = useState('')
   const [chIntent, setChIntent] = useState('')
   const [exporting, setExporting] = useState(false)
-  const navigate = useNavigate()
-
   const handleDeleteChapter = async (chapterId: string) => {
     if (!project) return
     const ch = project.chapters.find((c) => c.id === chapterId)

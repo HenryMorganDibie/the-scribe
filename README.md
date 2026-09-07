@@ -131,12 +131,12 @@ The Scribe talks to its LLM through one abstraction
 (`backend/app/services/ai/llm_client.py`), so the provider is a one-line config
 change — nothing else in the codebase changes.
 
-| | Anthropic (`claude-sonnet-4`) | Groq (`llama-3.3-70b-versatile`) |
+| | Anthropic (`claude-sonnet-4`) | Groq (`openai/gpt-oss-120b`) |
 |---|---|---|
-| Cost | Paid (~$3/$15 per M tokens in/out) | Free tier |
+| Cost | Paid (~$3/$15 per M tokens in/out) | $0.15/$0.60 per M input/output tokens |
 | Speed | Fast | Very fast |
 | Output quality for this use case | Best — strongest at sustained voice-matching and theological nuance over long generations | Good — solid for iterating on prompts, UI, and the demo flow; voice-matching is noticeably less precise on long chapters |
-| Recommended for | Final demo recording, submission, anything you'll show reviewers | Local development, rapid prompt iteration, rehearsing the demo flow for free |
+| Recommended for | Final demo recording, submission, anything you'll show reviewers | Local development, rapid prompt iteration, and cost-conscious production workloads |
 
 Set the provider in `backend/.env`:
 
@@ -147,15 +147,15 @@ ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
 
 GROQ_API_KEY=gsk_...
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 ```
 
 Restart the backend after changing `LLM_PROVIDER` — no code changes needed.
 Every `generation_logs` row records which provider produced it, so you can
 compare quality side-by-side if you generate the same chapter under both.
 
-**Recommendation for this project**: develop and rehearse on Groq (free, fast
-iteration), then switch to `LLM_PROVIDER=anthropic` for the final demo recording
+**Recommendation for this project**: develop and rehearse on Groq (fast,
+cost-effective iteration), then switch to `LLM_PROVIDER=anthropic` for the final demo recording
 and for whatever output you submit. The quality difference is real, especially
 on full chapter generations — Claude holds the voice brief and chapter memory
 more consistently over 1,500+ words.
@@ -636,7 +636,7 @@ in `frontend/src/styles/globals.css`.
   downloads the model (~90MB); the production `Dockerfile` pre-downloads it at
   build time so the deployed API/worker never pay this cost at request time.
 - **LLM provider**: the app runs on Anthropic (Claude Sonnet 4) or Groq
-  (Llama 3.3 70B), switchable via `LLM_PROVIDER` in `.env` — see
+  (GPT-OSS 120B), switchable via `LLM_PROVIDER` in `.env` — see
   [LLM provider](#llm-provider-anthropic-vs-groq) above. Groq's free tier doesn't
   return token usage on streamed responses, so cost/latency figures for Groq
   generations in `generation_logs` are estimates (word-count based), not exact.
@@ -682,6 +682,10 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 GROQ_API_KEY=gsk_...        # Required for sermon audio transcription (Whisper)
 
+# Optional: enables Sign in with Google. This is the OAuth Web client ID,
+# not a client secret.
+GOOGLE_CLIENT_ID=1234567890-your-client-id.apps.googleusercontent.com
+
 SECRET_KEY=<generate a long random string>
 ENVIRONMENT=production
 
@@ -717,10 +721,21 @@ Import the repo into Vercel, **set the root directory to `frontend`**, and add:
 
 ```env
 VITE_API_URL=https://your-api.onrender.com/api
+VITE_GOOGLE_CLIENT_ID=1234567890-your-client-id.apps.googleusercontent.com
 ```
 
 Then add that Vercel URL to the backend's `CORS_ORIGINS` on Render and
 redeploy.
+
+### 4. Google Sign-In (optional)
+
+In Google Cloud Console, create an **OAuth 2.0 Client ID** of type **Web
+application**. Add each local and production frontend URL under **Authorized
+JavaScript origins** (for example, `http://localhost:5173` and
+`https://your-frontend.vercel.app`). Set the same client ID as
+`GOOGLE_CLIENT_ID` on the backend and `VITE_GOOGLE_CLIENT_ID` on the frontend.
+No Google client secret is required: the backend verifies the signed Google ID
+token before it creates or signs in an account.
 
 ### Notes
 

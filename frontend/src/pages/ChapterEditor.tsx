@@ -6,7 +6,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import CharacterCount from '@tiptap/extension-character-count'
 import {
   ArrowLeft, Sparkles, Wand2, BookOpen, ScrollText, CheckCircle2,
-  Send, Loader2, Download, Save, PanelRight, X,
+  Send, Loader2, Download, Save, X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api, streamSSE } from '@/lib/api'
@@ -101,7 +101,6 @@ export default function ChapterEditor() {
     } finally {
       setLoading(false)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, chapterId, editor])
 
   useEffect(() => {
@@ -213,8 +212,6 @@ export default function ChapterEditor() {
     setActionLoading('continue')
     const cursorText = editor.getText()
 
-    let buffer = ''
-    const startPos = editor.state.doc.content.size
     editor.commands.focus('end')
 
     try {
@@ -222,7 +219,6 @@ export default function ChapterEditor() {
         '/generate/continue',
         { chapter_id: chapterId, cursor_text: cursorText },
         (chunk) => {
-          buffer += chunk
           editor.chain().focus('end').insertContent(chunk).run()
         },
         () => {

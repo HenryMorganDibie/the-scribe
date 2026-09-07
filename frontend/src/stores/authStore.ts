@@ -14,6 +14,7 @@ interface AuthState {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   signup: (email: string, password: string, fullName: string) => Promise<void>
+  googleLogin: (credential: string) => Promise<void>
   logout: () => void
   fetchMe: () => Promise<void>
 }
@@ -35,6 +36,12 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   signup: async (email, password, fullName) => {
     const res = await api.post('/auth/signup', { email, password, full_name: fullName })
+    localStorage.setItem('scribe_token', res.data.access_token)
+    set({ user: res.data.user })
+  },
+
+  googleLogin: async (credential) => {
+    const res = await api.post('/auth/google', { credential })
     localStorage.setItem('scribe_token', res.data.access_token)
     set({ user: res.data.user })
   },

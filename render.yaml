@@ -39,7 +39,7 @@ services:
       - key: LLM_PROVIDER
         value: groq                      # or "anthropic" if you set its key
       - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-120b
       - key: ANTHROPIC_MODEL
         value: claude-sonnet-4-20250514
       # ── Secrets / environment-specific: set these in the dashboard ────────
@@ -48,6 +48,8 @@ services:
                                          # postgresql://postgres.<ref>:<pwd>@aws-1-<region>.pooler.supabase.com:5432/postgres
                                          # URL-encode special chars in the password (@ -> %40, $ -> %24)
       - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false                      # only needed if LLM_PROVIDER=anthropic
@@ -77,3 +79,5 @@ services:
         sync: false                      # the API service URL + /api, e.g.
                                          # https://the-scribe-api.onrender.com/api
                                          # (build-time; redeploy the web service after the API URL is known)
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false                      # must match the backend GOOGLE_CLIENT_ID

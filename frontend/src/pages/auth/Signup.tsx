@@ -1,15 +1,16 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import QuillLogo from '@/components/ui/QuillLogo'
 import { useAuthStore } from '@/stores/authStore'
+import GoogleSignInButton from '@/components/auth/GoogleSignInButton'
 
 export default function Signup() {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const { signup } = useAuthStore()
+  const { signup, googleLogin } = useAuthStore()
   const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -24,6 +25,18 @@ export default function Signup() {
       setLoading(false)
     }
   }
+
+  const handleGoogleCredential = useCallback(async (credential: string) => {
+    setLoading(true)
+    try {
+      await googleLogin(credential)
+      navigate('/onboarding')
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Google sign-in failed')
+    } finally {
+      setLoading(false)
+    }
+  }, [googleLogin, navigate])
 
   return (
     <div className="min-h-screen bg-paper flex items-center justify-center px-6">
@@ -73,6 +86,12 @@ export default function Signup() {
               {loading ? 'Creating account…' : 'Create account'}
             </button>
           </form>
+          <div className="flex items-center gap-3 my-6 text-xs text-study-300">
+            <div className="h-px bg-rule flex-1" />
+            <span>or</span>
+            <div className="h-px bg-rule flex-1" />
+          </div>
+          <GoogleSignInButton onCredential={handleGoogleCredential} onError={toast.error} />
           <p className="text-sm text-study-300 mt-6">
             Already have an account?{' '}
             <Link to="/login" className="text-seal hover:underline">Log in</Link>
