@@ -37,9 +37,13 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: LLM_PROVIDER
-        value: groq                      # or "anthropic" if you set its key
+        value: rotate                    # Ollama -> Groq -> Anthropic failover; "anthropic"/"groq" pins to one
+      - key: OLLAMA_ENABLED
+        value: "false"                   # no *local* Ollama daemon reachable from Render — skip that path
       - key: GROQ_MODEL
         value: openai/gpt-oss-120b
+      - key: OLLAMA_CLOUD_MODEL
+        value: gpt-oss:120b
       - key: ANTHROPIC_MODEL
         value: claude-sonnet-4-20250514
       # ── Secrets / environment-specific: set these in the dashboard ────────
@@ -48,11 +52,14 @@ services:
                                          # postgresql://postgres.<ref>:<pwd>@aws-1-<region>.pooler.supabase.com:5432/postgres
                                          # URL-encode special chars in the password (@ -> %40, $ -> %24)
       - key: GROQ_API_KEY
-        sync: false
+        sync: false                      # rotation's primary text provider — set this for it to do anything
+      - key: OLLAMA_API_KEY
+        sync: false                      # optional — Ollama's direct cloud API (docs.ollama.com/api/authentication),
+                                         # reaches Ollama models with no local daemon; generate at ollama.com/settings/keys
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: ANTHROPIC_API_KEY
-        sync: false                      # only needed if LLM_PROVIDER=anthropic
+        sync: false                      # optional — rotation's last-resort fallback if set
       - key: CORS_ORIGINS
         sync: false                      # JSON array incl. the web URL, e.g.
                                          # ["https://the-scribe-web.onrender.com"]

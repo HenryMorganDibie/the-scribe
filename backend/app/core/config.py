@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     OLLAMA_ENABLED: bool = True
     OLLAMA_BASE_URL: str = "http://localhost:11434"
 
+    # Ollama's direct cloud API (https://ollama.com/api) — no local daemon
+    # needed, so this is what lets "rotate" reach Ollama models from a
+    # server like Render that has no Ollama installed. Only used if set;
+    # generate a key at https://ollama.com/settings/keys.
+    OLLAMA_API_KEY: str = ""
+    OLLAMA_CLOUD_MODEL: str = "gpt-oss:120b"
+
     # Google Sign-In uses a public OAuth web-client ID in the browser. The
     # backend verifies that every returned ID token was issued for this ID.
     GOOGLE_CLIENT_ID: str = ""

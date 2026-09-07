@@ -113,8 +113,19 @@ class OllamaProvider:
     """Streams a chat completion from a specific already-chosen Ollama model
     (model selection itself is LocalModelPool's job, not this class's).
 
-    `supports_thinking` must come from LocalModelPool's discovered
-    capabilities, not be guessed: models like gpt-oss ignore `think: false`
+    Works against either:
+      - a local Ollama daemon (`base_url=http://localhost:11434`, no `api_key`)
+        — this is what LocalModelPool discovery targets, and what "-cloud"
+        suffixed model names proxy through.
+      - Ollama's direct cloud API (`base_url=https://ollama.com/api`, with
+        `api_key` set) — no local daemon involved at all, so this is the one
+        that actually works from a server like Render. Model names here drop
+        the "-cloud" suffix (e.g. "gpt-oss:120b", not "gpt-oss:120b-cloud").
+        Bearer-token auth per https://docs.ollama.com/api/authentication.
+
+    `supports_thinking` must be known up front (from LocalModelPool's
+    discovered capabilities, or hardcoded for the fixed cloud-direct model
+    list below) rather than guessed: models like gpt-oss ignore `think: false`
     outright (confirmed live — it burns the entire max_tokens budget on
     hidden chain-of-thought and can return empty content at low budgets),
     but only honor `think: "low"` to actually cut reasoning down; sending
@@ -123,12 +134,14 @@ class OllamaProvider:
     `think` field at all.
     """
 
-    def __init__(self, base_url: str, model: str, supports_thinking: bool = False):
-        self.id = f"ollama:{model}"
+    def __init__(self, base_url: str, model: str, supports_thinking: bool = False, api_key: str = ""):
+        label = "ollama-cloud" if api_key else "ollama"
+        self.id = f"{label}:{model}"
         self.model = model
         self.last_usage: Optional[LLMUsage] = None
         self._base_url = base_url.rstrip("/")
         self._supports_thinking = supports_thinking
+        self._api_key = api_key
 
     async def stream(self, messages: list[dict], system: Optional[str], max_tokens: int) -> AsyncIterator[str]:
         import json
@@ -148,8 +161,10 @@ class OllamaProvider:
         if self._supports_thinking:
             payload["think"] = "low"
 
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+
         async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", f"{self._base_url}/api/chat", json=payload) as resp:
+            async with client.stream("POST", f"{self._base_url}/api/chat", json=payload, headers=headers) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line:
@@ -216,12 +231,30 @@ class ProviderRouter:
 
 DEFAULT_GROQ_FALLBACKS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"]
 
+# Ollama's direct cloud API (https://docs.ollama.com/api/authentication) —
+# no local daemon involved, so this is what actually works from a server
+# with no Ollama installed (e.g. Render). Model names drop the "-cloud"
+# suffix used by the local-daemon proxy path. Both are gpt-oss reasoning
+# models (same family already handled locally), hence supports_thinking=True.
+OLLAMA_CLOUD_BASE_URL = "https://ollama.com"  # OllamaProvider appends /api/chat itself
+DEFAULT_OLLAMA_CLOUD_FALLBACKS: list[tuple[str, bool]] = [("gpt-oss:120b", True), ("gpt-oss:20b", True)]
+
 
 def _groq_priority_models() -> list[str]:
     models = [settings.GROQ_MODEL] if settings.GROQ_MODEL else []
     for m in DEFAULT_GROQ_FALLBACKS:
         if m not in models:
             models.append(m)
+    return models
+
+
+def _ollama_cloud_priority_models() -> list[tuple[str, bool]]:
+    models = [(settings.OLLAMA_CLOUD_MODEL, True)] if settings.OLLAMA_CLOUD_MODEL else []
+    seen = {m[0] for m in models}
+    for m in DEFAULT_OLLAMA_CLOUD_FALLBACKS:
+        if m[0] not in seen:
+            models.append(m)
+            seen.add(m[0])
     return models
 
 
@@ -244,6 +277,12 @@ def _build_rotating_router() -> ProviderRouter:
             async def _groq_candidate(model=model):
                 return GroqProvider(settings.GROQ_API_KEY, model)
             candidates.append(_groq_candidate)
+
+    if settings.OLLAMA_API_KEY:
+        for model, supports_thinking in _ollama_cloud_priority_models():
+            async def _ollama_cloud_candidate(model=model, supports_thinking=supports_thinking):
+                return OllamaProvider(OLLAMA_CLOUD_BASE_URL, model, supports_thinking, api_key=settings.OLLAMA_API_KEY)
+            candidates.append(_ollama_cloud_candidate)
 
     if settings.ANTHROPIC_API_KEY:
         async def _anthropic_candidate():
@@ -325,7 +364,10 @@ COST_PER_TOKEN = {
     "anthropic": {"input": 0.000003, "output": 0.000015},   # claude-sonnet-4
     # GPT-OSS 120B on Groq: $0.15 input / $0.60 output per million tokens.
     "groq": {"input": 0.00000015, "output": 0.00000060},
-    "ollama": {"input": 0.0, "output": 0.0},  # local + free cloud-hosted models
+    "ollama": {"input": 0.0, "output": 0.0},  # local daemon (incl. "-cloud" proxy) — free
+    # Ollama's direct cloud API is credit-metered, not published per-token —
+    # logged as 0 same as the free tier above since no real per-token rate exists to apply.
+    "ollama-cloud": {"input": 0.0, "output": 0.0},
 }
 
 
