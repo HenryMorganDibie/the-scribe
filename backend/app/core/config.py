@@ -56,14 +56,34 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str = ""
 
     # ── LLM provider ──────────────────────────────────────────────
-    # "anthropic" (production target) or "groq" (fast, cost-effective option)
-    LLM_PROVIDER: str = "anthropic"
+    # "rotate" (default): rotates across local/free-cloud Ollama models,
+    #     then Groq's free tier, then Anthropic as a last-resort fallback —
+    #     tries each in order, skips anything currently rate-limited/failing,
+    #     fails over silently. Costs nothing until it actually has to reach
+    #     Anthropic.
+    # "anthropic" / "groq": pin to exactly one provider, no rotation — for
+    #     guaranteed-consistent output (e.g. a final manuscript export) or
+    #     to isolate one provider while debugging.
+    LLM_PROVIDER: str = "rotate"
 
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
 
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "openai/gpt-oss-120b"
+
+    # Local Ollama server used by the "rotate" pool (see services/ai/ollama_pool.py).
+    # Safe to leave enabled on hosts with no Ollama running — discovery just
+    # fails fast and the router moves on to Groq/Anthropic.
+    OLLAMA_ENABLED: bool = True
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+
+    # Ollama's direct cloud API (https://ollama.com/api) — no local daemon
+    # needed, so this is what lets "rotate" reach Ollama models from a
+    # server like Render that has no Ollama installed. Only used if set;
+    # generate a key at https://ollama.com/settings/keys.
+    OLLAMA_API_KEY: str = ""
+    OLLAMA_CLOUD_MODEL: str = "gpt-oss:120b"
 
     # Google Sign-In uses a public OAuth web-client ID in the browser. The
     # backend verifies that every returned ID token was issued for this ID.
@@ -127,9 +147,16 @@ class Settings(BaseSettings):
             problems.append(
                 "LLM_PROVIDER=groq but GROQ_API_KEY is not set."
             )
-        elif self.LLM_PROVIDER not in ("anthropic", "groq"):
+        elif self.LLM_PROVIDER == "rotate":
+            if not self.GROQ_API_KEY and not self.ANTHROPIC_API_KEY and not self.OLLAMA_ENABLED:
+                problems.append(
+                    "LLM_PROVIDER=rotate but no provider is configured — set GROQ_API_KEY "
+                    "and/or ANTHROPIC_API_KEY, or leave OLLAMA_ENABLED=true with a local "
+                    "Ollama server running."
+                )
+        elif self.LLM_PROVIDER not in ("anthropic", "groq", "rotate"):
             problems.append(
-                f'LLM_PROVIDER must be "anthropic" or "groq", got {self.LLM_PROVIDER!r}.'
+                f'LLM_PROVIDER must be "rotate", "anthropic", or "groq", got {self.LLM_PROVIDER!r}.'
             )
 
         if self.ENVIRONMENT == "production" and self.SECRET_KEY == "change-me-in-production":
