@@ -77,7 +77,7 @@ services:
     envVars:
       - key: VITE_API_URL
         sync: false                      # the API service URL + /api, e.g.
-                                         # https://the-scribe-api.onrender.com/api
+                                         # https://the-scribe.onrender.com/api
                                          # (build-time; redeploy the web service after the API URL is known)
       - key: VITE_GOOGLE_CLIENT_ID
         sync: false                      # must match the backend GOOGLE_CLIENT_ID
