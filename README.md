@@ -67,7 +67,7 @@ nothing about local development changes if you never touch Render.
 | Voice DNA extraction (background job) | `backend/app/workers/tasks.py` → `extract_voice_dna_task` |
 | pgvector embeddings + RAG retrieval | `backend/app/services/voice/embeddings.py`, `retrieve_relevant_context` in `generation.py` |
 | Voice Brief builder (the "ghost brief") | `build_voice_brief` in `app/services/ai/generation.py` |
-| LLM provider abstraction (Anthropic / Groq) | `backend/app/services/ai/llm_client.py` |
+| LLM provider rotation (Ollama / Groq / Anthropic) | `backend/app/services/ai/llm_client.py` |
 | Health checks (liveness + DB readiness) | `GET /api/health`, `GET /api/health/db` in `app/main.py` |
 | Non-blocking background jobs with logging | `backend/app/utils/jobs.py` |
 | Chapter memory (prior-chapter summaries) | `get_chapter_memory` in `generation.py`, `generate_chapter_summary_task` |
@@ -117,48 +117,72 @@ the author's actual material rather than a generic prompt template.
 - **Node.js 18+** and npm
 - **PostgreSQL 15+ with the `pgvector` extension** (or use the provided `docker-compose.yml`)
 - **Redis** (for background jobs — optional in dev, the app degrades gracefully without it)
-- An LLM provider key — **either**:
-  - an **Anthropic API key** (`ANTHROPIC_API_KEY`) — this is the production target
-    and what the final demo/submission should run on, **or**
+- An LLM provider key — **at least one of**:
   - a **Groq API key** (`GROQ_API_KEY`, free at [console.groq.com](https://console.groq.com)) —
-    useful for development iteration without spending Anthropic credits
+    the default rotation tries this first, free tier
+  - an **Anthropic API key** (`ANTHROPIC_API_KEY`) — used as the rotation's
+    last-resort fallback, and what to pin to (`LLM_PROVIDER=anthropic`) for a
+    final demo/submission where consistent output quality matters more than cost
+  - neither is strictly required if you have a local [Ollama](https://ollama.com)
+    server running with any chat-capable model pulled — the rotation picks it up
+    automatically
 
 ---
 
-## LLM provider: Anthropic vs Groq
+## LLM provider: rotation, or pin to one
 
 The Scribe talks to its LLM through one abstraction
-(`backend/app/services/ai/llm_client.py`), so the provider is a one-line config
-change — nothing else in the codebase changes.
+(`backend/app/services/ai/llm_client.py`). By default (`LLM_PROVIDER=rotate`)
+it rotates across providers instead of committing to a single one:
 
-| | Anthropic (`claude-sonnet-4`) | Groq (`openai/gpt-oss-120b`) |
-|---|---|---|
-| Cost | Paid (~$3/$15 per M tokens in/out) | $0.15/$0.60 per M input/output tokens |
-| Speed | Fast | Very fast |
-| Output quality for this use case | Best — strongest at sustained voice-matching and theological nuance over long generations | Good — solid for iterating on prompts, UI, and the demo flow; voice-matching is noticeably less precise on long chapters |
-| Recommended for | Final demo recording, submission, anything you'll show reviewers | Local development, rapid prompt iteration, and cost-conscious production workloads |
+1. **Local/free Ollama models** — whatever chat-capable models are pulled on
+   `OLLAMA_BASE_URL` are discovered and benchmarked at runtime (no hardcoded
+   model list), including Ollama's free cloud-hosted models (e.g.
+   `gpt-oss:120b-cloud`) if you've pulled them. Skipped instantly if no
+   Ollama server is reachable.
+2. **Groq's free tier** — `GROQ_MODEL` first, then `openai/gpt-oss-120b` →
+   `openai/gpt-oss-20b` → `qwen/qwen3.6-27b` as fallbacks if one is
+   rate-limited or erroring.
+3. **Anthropic** (`claude-sonnet-4`) — last resort, only reached if every
+   Groq/Ollama candidate above is unavailable, and only tried at all if
+   `ANTHROPIC_API_KEY` is set.
 
-Set the provider in `backend/.env`:
+Each provider is tracked by a shared health/cooldown system (flat 60s
+cooldown on a 429, exponential backoff on repeated errors), so a
+rate-limited or misbehaving provider gets skipped on the next request rather
+than retried blind — the same pattern used in the
+[Interview Copilot](https://github.com/HenryMorganDibie/interview-copilot)
+project's provider rotation. Failover is silent: `generate_chapter_stream`
+and friends never see which provider actually answered mid-request, they
+just get one clean stream of text.
+
+To pin to exactly one provider instead (no rotation), set:
 
 ```env
-LLM_PROVIDER=anthropic   # or "groq"
+LLM_PROVIDER=anthropic   # or "groq" — disables rotation entirely
 
 ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
 
 GROQ_API_KEY=gsk_...
 GROQ_MODEL=openai/gpt-oss-120b
+
+OLLAMA_ENABLED=true
+OLLAMA_BASE_URL=http://localhost:11434
 ```
 
 Restart the backend after changing `LLM_PROVIDER` — no code changes needed.
-Every `generation_logs` row records which provider produced it, so you can
-compare quality side-by-side if you generate the same chapter under both.
+Every `generation_logs` row records exactly which provider+model served that
+specific request (e.g. `groq:openai/gpt-oss-120b`, `ollama:gpt-oss:120b-cloud`,
+or `anthropic`), so you can see the real mix rotation produced, and compare
+quality side-by-side across providers if you want.
 
-**Recommendation for this project**: develop and rehearse on Groq (fast,
-cost-effective iteration), then switch to `LLM_PROVIDER=anthropic` for the final demo recording
-and for whatever output you submit. The quality difference is real, especially
-on full chapter generations — Claude holds the voice brief and chapter memory
-more consistently over 1,500+ words.
+**Recommendation for this project**: leave `LLM_PROVIDER=rotate` for
+development and rehearsal — free, and resilient to any single provider's
+rate limits going down mid-session. Switch to `LLM_PROVIDER=anthropic` for
+the final demo recording and for whatever output you submit — Claude holds
+the voice brief and chapter memory more consistently over full 1,500+ word
+chapter generations than the free-tier alternatives.
 
 ---
 
@@ -579,7 +603,7 @@ the-scribe/
 │   │   │                          #   testimonies, scriptures, projects,
 │   │   │                          #   chapters, generation_logs)
 │   │   ├── services/
-│   │   │   ├── ai/llm_client.py    # Anthropic / Groq provider abstraction
+│   │   │   ├── ai/llm_client.py    # Ollama / Groq / Anthropic rotation + fallback
 │   │   │   ├── ai/generation.py   # voice brief builder, chapter generation,
 │   │   │   │                      #   voice preview, voice DNA extraction,
 │   │   │   │                      #   voice match scoring
@@ -635,11 +659,13 @@ in `frontend/src/styles/globals.css`.
   locally on CPU — fine for demo-scale data. Locally, the first embedding call
   downloads the model (~90MB); the production `Dockerfile` pre-downloads it at
   build time so the deployed API/worker never pay this cost at request time.
-- **LLM provider**: the app runs on Anthropic (Claude Sonnet 4) or Groq
-  (GPT-OSS 120B), switchable via `LLM_PROVIDER` in `.env` — see
-  [LLM provider](#llm-provider-anthropic-vs-groq) above. Groq's free tier doesn't
-  return token usage on streamed responses, so cost/latency figures for Groq
-  generations in `generation_logs` are estimates (word-count based), not exact.
+- **LLM provider**: by default the app rotates across Ollama, Groq, and
+  Anthropic, or can be pinned to one via `LLM_PROVIDER` in `.env` — see
+  [LLM provider: rotation, or pin to one](#llm-provider-rotation-or-pin-to-one)
+  above. Groq's free tier doesn't return token usage on streamed responses,
+  so cost/latency figures for Groq generations in `generation_logs` are
+  estimates (word-count based), not exact; Ollama generations report real
+  usage from the local API's `done` response.
 - **DOCX export** produces a clean, publisher-style manuscript but doesn't yet
   handle embedded images or a generated table of contents.
 - **No PDF export** yet — only `.docx`.

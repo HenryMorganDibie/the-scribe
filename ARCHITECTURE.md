@@ -60,14 +60,16 @@ Fonts: Source Serif 4 (display), Source Sans 3 (UI), Lora (manuscript editor).
 | Auth | JWT (python-jose) + bcrypt | Stateless, no session store |
 | Embeddings | fastembed (ONNX) | Local inference, no GPU, ~90MB model |
 | Background | FastAPI BackgroundTasks | In-process, no broker/worker |
-| LLM abstraction | `app/services/ai/llm_client.py` | `LLM_PROVIDER=anthropic` or `groq`, zero code changes to switch |
+| LLM abstraction | `app/services/ai/llm_client.py` | `LLM_PROVIDER=rotate` (default): Ollama → Groq → Anthropic with health-based failover; or pin to `anthropic`/`groq` |
 
 ### Key Services
 
 ```
 app/services/
 ├── ai/
-│   ├── llm_client.py         # Provider abstraction (Anthropic / Groq)
+│   ├── llm_client.py         # Ollama / Groq / Anthropic rotation + fallback
+│   ├── ollama_pool.py        # Discovers + benchmarks local/free-cloud Ollama models
+│   ├── provider_health.py    # Shared cooldown tracker for the rotation
 │   ├── generation.py         # Voice brief, chapter generation, voice DNA,
 │   │                         #   analyze_voice_drift() multi-dimensional scoring
 │   └── companion_chat.py     # Whole-manuscript RAG chat
@@ -174,8 +176,8 @@ alembic upgrade head && python scripts/seed_scriptures.py && uvicorn app.main:ap
 **Required env vars (backend)**:
 ```
 DATABASE_URL         Supabase Session pooler connection string
-ANTHROPIC_API_KEY    When LLM_PROVIDER=anthropic
-GROQ_API_KEY         Sermon audio transcription
+ANTHROPIC_API_KEY    Rotation fallback, or required when LLM_PROVIDER=anthropic
+GROQ_API_KEY         Rotation's primary text provider + sermon audio transcription
 SECRET_KEY           JWT signing key
 ENVIRONMENT          Set to "production" on Render
 CORS_ORIGINS         JSON array of allowed frontend origins
@@ -191,4 +193,4 @@ CORS_ORIGINS         JSON array of allowed frontend origins
 
 **fastembed over sentence-transformers.** ONNX runtime is ~10x smaller than PyTorch, faster cold starts, identical embeddings. 384-dim vectors; exact cosine search (no IVFFlat index) is fast enough at per-user query scale.
 
-**Provider-agnostic LLM client.** Single `llm_client.py` interface wraps both Anthropic and Groq. `LLM_PROVIDER` env var switches at runtime — free/fast Groq for dev, Claude for production voice consistency.
+**Provider-agnostic LLM client with rotation.** Single `llm_client.py` interface wraps Ollama, Groq, and Anthropic behind one streaming API. Default mode (`LLM_PROVIDER=rotate`) tries local/free-cloud Ollama models first, then Groq's free tier, then Anthropic — each candidate tracked by a shared cooldown tracker (`provider_health.py`) so a rate-limited or erroring provider is skipped rather than retried blind, and failover between them is silent to callers. `LLM_PROVIDER` can still pin to a single provider (`anthropic`/`groq`) when consistent output matters more than cost, e.g. for a final submission.
