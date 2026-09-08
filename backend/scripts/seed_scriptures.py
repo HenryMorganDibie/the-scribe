@@ -1,13 +1,55 @@
 """
-Seed the scripture index with key apostolic/prophetic/Spirit-filled scriptures.
+Seed the scripture index: a small hand-curated list of apostolic/prophetic/
+Spirit-filled scriptures (NKJV, with themes for matching), plus the full
+KJV text of the whole Bible for verification/grounding.
+
+KJV is public domain (unlike NKJV, which is under copyright and not cleared
+for bulk storage at this scale) — see backend/scripts/data/kjv_verses.json,
+sourced from https://github.com/farskipper/kjv (public domain, 1769 Oxford
+edition text). That dataset marks KJV's own translator conventions inline:
+"# " prefixes a new-paragraph verse, and "[word]" marks a word the
+translators added for readability that isn't in the original-language text.
+_clean_kjv_text() strips both markers for plain storage/display.
+
 Run: python scripts/seed_scriptures.py
 """
 import asyncio
+import json
+import re
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-SCRIPTURES = [
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+KJV_JSON_PATH = os.path.join(DATA_DIR, "kjv_verses.json")
+
+# Order matters: index < len(OLD_TESTAMENT_BOOKS) => testament "old". Renamed
+# "Solomon's Song" (the source dataset's book name) to the more familiar
+# "Song of Solomon" for storage/display.
+OLD_TESTAMENT_BOOKS = [
+    "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua",
+    "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings",
+    "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job",
+    "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon", "Isaiah",
+    "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos",
+    "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai",
+    "Zechariah", "Malachi",
+]
+NEW_TESTAMENT_BOOKS = [
+    "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians",
+    "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians",
+    "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus",
+    "Philemon", "Hebrews", "James", "1 Peter", "2 Peter", "1 John",
+    "2 John", "3 John", "Jude", "Revelation",
+]
+BOOK_RENAME = {"Solomon's Song": "Song of Solomon"}
+TESTAMENT_BY_BOOK = {b: "old" for b in OLD_TESTAMENT_BOOKS}
+TESTAMENT_BY_BOOK.update({b: "new" for b in NEW_TESTAMENT_BOOKS})
+
+_REF_RE = re.compile(r"^(.+) (\d+):(\d+)$")
+_BRACKET_RE = re.compile(r"\[([^\]]*)\]")
+
+CURATED_SCRIPTURES = [
     {"reference": "Isaiah 61:1-3", "book": "Isaiah", "chapter": 61, "verse_start": 1, "verse_end": 3,
      "themes": ["calling", "anointing", "healing", "freedom"], "testament": "old",
      "text_nkjv": "The Spirit of the Lord GOD is upon Me, because the LORD has anointed Me to preach good tidings to the poor; He has sent Me to heal the brokenhearted, to proclaim liberty to the captives, and the opening of the prison to those who are bound..."},
@@ -56,18 +98,56 @@ SCRIPTURES = [
 ]
 
 
+def _clean_kjv_text(raw: str) -> str:
+    """Strip the source dataset's paragraph marker and italic-word brackets."""
+    text = raw[2:] if raw.startswith("# ") else raw
+    text = _BRACKET_RE.sub(r"\1", text)
+    return text.strip()
+
+
+def load_full_kjv() -> list[dict]:
+    """Parse backend/scripts/data/kjv_verses.json into per-verse row dicts."""
+    with open(KJV_JSON_PATH, encoding="utf-8") as f:
+        raw = json.load(f)
+
+    rows = []
+    for key, text in raw.items():
+        m = _REF_RE.match(key)
+        if not m:
+            continue
+        book, chapter, verse = m.group(1), int(m.group(2)), int(m.group(3))
+        book = BOOK_RENAME.get(book, book)
+        testament = TESTAMENT_BY_BOOK.get(book)
+        if testament is None:
+            continue
+        rows.append({
+            "book": book,
+            "chapter": chapter,
+            "verse_start": verse,
+            "reference": f"{book} {chapter}:{verse}",
+            "text_kjv": _clean_kjv_text(text),
+            "testament": testament,
+        })
+    return rows
+
+
 async def seed():
     from app.db.session import AsyncSessionLocal
     from app.models import Scripture
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
-        for s in SCRIPTURES:
-            existing = await db.execute(select(Scripture).where(Scripture.reference == s["reference"]))
-            if existing.scalar_one_or_none():
+        # Curated scriptures first — small enough for a per-row upsert, and
+        # this establishes the NKJV text + themes for any reference the bulk
+        # KJV import below might also touch.
+        curated_added = 0
+        for s in CURATED_SCRIPTURES:
+            existing = (
+                await db.execute(select(Scripture).where(Scripture.reference == s["reference"]))
+            ).scalar_one_or_none()
+            if existing:
                 continue
-
-            scripture = Scripture(
+            db.add(Scripture(
                 book=s["book"],
                 chapter=s["chapter"],
                 verse_start=s["verse_start"],
@@ -76,11 +156,43 @@ async def seed():
                 text_nkjv=s.get("text_nkjv"),
                 themes=s["themes"],
                 testament=s["testament"],
-            )
-            db.add(scripture)
-
+            ))
+            curated_added += 1
         await db.commit()
-        print(f"Seeded {len(SCRIPTURES)} scriptures.")
+
+        # Full KJV — fetch existing rows ONCE (not per-row) so repeat runs
+        # (this script is in Render's preDeployCommand, so it runs on every
+        # deploy) stay fast once the table is fully seeded.
+        existing = {
+            row.reference: row
+            for row in (await db.execute(select(Scripture.id, Scripture.reference, Scripture.text_kjv))).all()
+        }
+
+        kjv_rows = load_full_kjv()
+        new_rows = []
+        kjv_backfill = []  # (id, text_kjv) for a curated row that predates this bulk import
+        for r in kjv_rows:
+            match = existing.get(r["reference"])
+            if match is None:
+                new_rows.append(r)
+            elif match.text_kjv is None:
+                kjv_backfill.append((match.id, r["text_kjv"]))
+
+        CHUNK = 2000
+        for i in range(0, len(new_rows), CHUNK):
+            chunk = new_rows[i:i + CHUNK]
+            db.add_all(Scripture(**row) for row in chunk)
+            await db.commit()
+
+        for id_, text_kjv in kjv_backfill:
+            row = await db.get(Scripture, id_)
+            row.text_kjv = text_kjv
+        if kjv_backfill:
+            await db.commit()
+
+        print(f"Seeded {curated_added} new curated scriptures, {len(new_rows)} new full-KJV verses, "
+              f"backfilled text_kjv on {len(kjv_backfill)} pre-existing curated rows "
+              f"({len(kjv_rows) - len(new_rows) - len(kjv_backfill)} already fully seeded).")
 
 
 if __name__ == "__main__":

@@ -9,9 +9,10 @@ from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Optional, List
 import json
+import re
 
 from app.db.session import get_db
-from app.models import User, VoiceProfile, Testimony, GenerationLog
+from app.models import User, VoiceProfile, Testimony, GenerationLog, Scripture
 from app.core.security import get_current_user
 from app.api.ownership import get_owned_chapter, get_owned_project
 from app.services.ai.generation import (
@@ -251,6 +252,47 @@ Passage:
 # ─────────────────────────────────────────────
 # Scripture suggestion
 # ─────────────────────────────────────────────
+_SCRIPTURE_REF_RE = re.compile(r"^(.+?)\s+(\d+):(\d+)(?:-(\d+))?$")
+
+
+async def _verify_scripture(ref: str, translation: str, db: AsyncSession) -> Optional[dict]:
+    """
+    Look up a suggested reference against the real scripture index (see
+    Scripture model / scripts/seed_scriptures.py) so verse TEXT is never
+    taken from the LLM's own memory — only the reference string is, and
+    that reference has to resolve to a real, stored verse or the
+    suggestion is dropped entirely. This is what actually enforces "no
+    hallucinated references" instead of just asking the model nicely.
+    """
+    ref = ref.strip()
+    row = (await db.execute(select(Scripture).where(Scripture.reference == ref))).scalar_one_or_none()
+
+    if row is None:
+        m = _SCRIPTURE_REF_RE.match(ref)
+        if not m:
+            return None
+        book, chapter, verse_start = m.group(1), int(m.group(2)), int(m.group(3))
+        row = (
+            await db.execute(
+                select(Scripture).where(
+                    Scripture.book == book,
+                    Scripture.chapter == chapter,
+                    Scripture.verse_start == verse_start,
+                )
+            )
+        ).scalar_one_or_none()
+
+    if row is None:
+        return None
+
+    text = row.text_nkjv if translation.upper() == "NKJV" else None
+    text = text or row.text_nkjv or row.text_kjv or row.text_niv or row.text_esv
+    if not text:
+        return None
+
+    return {"ref": row.reference, "text": text}
+
+
 @router.post("/scripture-suggest")
 async def scripture_suggest(
     body: ScriptureSuggestRequest,
@@ -262,24 +304,37 @@ async def scripture_suggest(
     anchor = [s["ref"] for s in (profile.anchor_scriptures or [])][:10]
     translation = profile.preferred_translation or "NKJV"
 
-    prompt = f"""Suggest 3 relevant Bible scriptures for this writing context.
+    prompt = f"""Suggest 5 relevant Bible scriptures for this writing context.
 
 Context: {body.context[:500]}
 Author's preferred translation: {translation}
 Author's anchor scriptures (prioritize these if relevant): {', '.join(anchor) if anchor else 'none'}
 
-Return JSON array: [{{"ref": "Book Chapter:Verse", "text": "verse text in {translation}", "reason": "why this fits"}}]
-Only verified scriptures. No hallucinated references. Return ONLY valid JSON."""
+Return JSON array: [{{"ref": "Book Chapter:Verse", "reason": "why this fits"}}]
+Each reference is checked against a real scripture database afterward and its actual verse
+text is used, not anything you write here, so do not include a "text" field. Any reference
+that fails to verify is discarded, so suggest more candidates than you're fully confident
+about. Return ONLY valid JSON."""
 
     llm = get_llm_client()
     result = await llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=500)
 
-    import json as json_mod
     try:
         clean = result.text.strip().replace("```json", "").replace("```", "")
-        suggestions = json_mod.loads(clean)
+        candidates = json.loads(clean)
     except Exception:
-        suggestions = []
+        candidates = []
+
+    suggestions = []
+    for c in candidates:
+        if not isinstance(c, dict) or not c.get("ref"):
+            continue
+        verified = await _verify_scripture(c["ref"], translation, db)
+        if verified is None:
+            continue
+        suggestions.append({"ref": verified["ref"], "text": verified["text"], "reason": c.get("reason", "")})
+        if len(suggestions) >= 3:
+            break
 
     return {"suggestions": suggestions}
 

@@ -8,7 +8,11 @@ services:
       POSTGRES_PASSWORD: scribe
       POSTGRES_DB: thescribe
     ports:
-      - "5432:5432"
+      # Host port 5434, not 5432 — a native (non-Docker) Postgres install can
+      # already own 5432 on some machines, and localhost:5432 then silently
+      # connects to THAT instead of this container (wrong credentials, no
+      # obvious error). 5434 sidesteps it; container-internal port is still 5432.
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
