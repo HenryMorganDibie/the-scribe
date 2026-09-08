@@ -31,8 +31,13 @@ services:
     healthCheckPath: /api/health
     # Run migrations + seed ONCE before the new version goes live. Keeping this
     # out of the start command is what prevents the crash-loop the Railway
-    # deploy hit (the web process must just run uvicorn and stay alive).
+    # deploy hit (the web process must just run uvicorn and stay alive) --
+    # startCommand below is what actually enforces that: without it Render
+    # falls back to the Dockerfile's CMD, which re-runs migrate+seed on every
+    # container start, not just on deploy (including free-tier cold starts
+    # after the service sleeps -- now a real cost with the full KJV seed).
     preDeployCommand: "alembic upgrade head && python scripts/seed_scriptures.py"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: ENVIRONMENT
         value: production
