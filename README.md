@@ -50,11 +50,10 @@ nothing about local development changes if you never touch Render.
 - [Design system](#design-system)
 - [Known limitations / what's stubbed](#known-limitations--whats-stubbed)
 - [Deploying to Render](#deploying-to-render)
-  - [1. Postgres with pgvector](#1-postgres-with-pgvector)
-  - [2. Redis](#2-redis)
-  - [3. API service](#3-api-service)
-  - [4. Worker service](#4-worker-service)
-  - [5. Frontend (Vercel)](#5-frontend-vercel)
+  - [1. Database: Supabase (required: pgvector)](#1-database-supabase-required-pgvector)
+  - [2. Backend (Render Web Service)](#2-backend-render-web-service)
+  - [3. Frontend (Vercel)](#3-frontend-vercel)
+  - [4. Google Sign-In (optional)](#4-google-sign-in-optional)
 
 ---
 
@@ -90,11 +89,18 @@ nothing about local development changes if you never touch Render.
                              │
                   ┌──────────┼──────────┐
                   ▼                     ▼
-          ┌───────────────┐   ┌──────────────────┐
-          │  Anthropic API │   │  Dramatiq + Redis │
-          │ (Claude Sonnet)│   │  (background jobs)│
-          └───────────────┘   └──────────────────┘
+          ┌───────────────┐   ┌──────────────────────┐
+          │ Ollama / Groq /│   │  In-process           │
+          │ Anthropic      │   │  BackgroundTasks       │
+          │ (rotation)     │   │  (background jobs)     │
+          └───────────────┘   └──────────────────────┘
 ```
+
+No separate worker process or message broker: background jobs run in the
+same process as the request that triggers them, right after the response
+is sent (see `app/workers/tasks.py` for why — an earlier Dramatiq+Redis
+setup silently dropped every job in production, since nothing was ever
+running a worker to consume the queue).
 
 Every AI generation request (chapter draft, "continue writing", weave-story, chat)
 goes through `build_voice_brief()`, which compiles:
@@ -116,7 +122,6 @@ the author's actual material rather than a generic prompt template.
 - **Python 3.11+**
 - **Node.js 18+** and npm
 - **PostgreSQL 15+ with the `pgvector` extension** (or use the provided `docker-compose.yml`)
-- **Redis** (for background jobs — optional in dev, the app degrades gracefully without it)
 - An LLM provider key — **at least one of**:
   - a **Groq API key** (`GROQ_API_KEY`, free at [console.groq.com](https://console.groq.com)) —
     the default rotation tries this first, free tier
@@ -191,15 +196,17 @@ chapter generations than the free-tier alternatives.
 ### 1. Database (Postgres + pgvector)
 
 Easiest path — use the provided Docker Compose file, which runs Postgres with
-pgvector pre-installed and Redis:
+pgvector pre-installed:
 
 ```bash
 docker compose up -d
 ```
 
-This starts:
-- Postgres on `localhost:5432` (user `scribe`, password `scribe`, db `thescribe`)
-- Redis on `localhost:6379`
+This starts Postgres on `localhost:5434` (user `scribe`, password `scribe`, db
+`thescribe`) — port 5434, not Postgres's usual 5432, since a native (non-Docker)
+Postgres install can already own 5432 on some machines, and `localhost:5432`
+then silently connects to that instead of this container (wrong credentials,
+no obvious error). See `docker-compose.yml`'s `postgres` service comment.
 
 If you'd rather use Supabase or a managed Postgres, just make sure the `vector`
 extension is enabled (`CREATE EXTENSION IF NOT EXISTS vector;`) — the first
@@ -222,13 +229,13 @@ Edit `.env` (minimum needed to run locally):
 ```env
 DATABASE_URL=postgresql+asyncpg://scribe:scribe@localhost:5432/thescribe
 
-# Pick one provider — see "LLM provider" section above
-LLM_PROVIDER=groq
+# Default mode rotates providers automatically, so at least one key below is
+# enough to start. See "LLM provider" section above.
+LLM_PROVIDER=rotate
 GROQ_API_KEY=gsk_...your-key...
 # ANTHROPIC_API_KEY=sk-ant-...your-key...
 
 SECRET_KEY=generate-a-random-string-here
-REDIS_URL=redis://localhost:6379/0
 CORS_ORIGINS=["http://localhost:5173"]
 ```
 
@@ -243,14 +250,19 @@ normalizes whatever Postgres scheme it's given (this is what lets the exact same
 `.env` structure work against Railway's or Supabase's connection strings later,
 covered in [Deploying to Render](#deploying-to-render)).
 
-Run migrations and seed the scripture index:
+Run migrations and seed the scripture index (15 hand-curated NKJV verses,
+plus the full public-domain KJV Bible for `/scripture-suggest` grounding,
+see [Known limitations](#known-limitations--whats-stubbed)):
 
 ```bash
 alembic upgrade head
 python scripts/seed_scriptures.py
 ```
 
-You should see `Seeded 15 scriptures.`
+First run seeds everything (`Seeded 15 new curated scriptures, 31089 new
+full-KJV verses, backfilled text_kjv on 13 pre-existing curated rows...`).
+The script is idempotent, so re-running it (it's also in `preDeployCommand`
+on Render) is cheap after that.
 
 Start the API:
 
@@ -266,22 +278,10 @@ Two health endpoints are useful for confirming setup:
 - `GET /api/health/db` — confirms the database connection is alive (returns
   `503` if `DATABASE_URL` is wrong or Postgres isn't reachable)
 
-**(Optional) Start the background worker** — needed for Voice DNA extraction and
-chapter summaries to run automatically. In a second terminal:
-
-```bash
-cd backend
-source venv/bin/activate
-dramatiq app.workers.tasks
-```
-
-Without this running, onboarding still completes and the app remains usable —
-background jobs (voice DNA extraction, embedding indexing, chapter summaries)
-are dispatched non-blockingly via `app/utils/jobs.py`: if Redis/Dramatiq isn't
-reachable, the request still succeeds and a warning is logged
-(`background_job_enqueue_failed`) rather than failing silently. Start the
-worker later and re-trigger onboarding completion (or just wait — jobs queue in
-Redis) to backfill.
+Voice DNA extraction, embedding indexing, and chapter summaries run
+automatically. No second process to start: `app/utils/jobs.py` schedules
+them via FastAPI's `BackgroundTasks`, so they execute in this same
+`uvicorn` process right after the triggering request's response is sent.
 
 ### 3. Frontend
 
@@ -309,9 +309,9 @@ Visit `http://localhost:5173`.
 
 ## Running it
 
-With Postgres/Redis (via `docker compose up -d`), the backend (`uvicorn`), the
-worker (`dramatiq`), and the frontend (`npm run dev`) all running, you have the
-full stack live at `http://localhost:5173`.
+With Postgres (via `docker compose up -d`), the backend (`uvicorn`), and the
+frontend (`npm run dev`) all running, you have the full stack live at
+`http://localhost:5173`.
 
 ---
 
@@ -346,8 +346,9 @@ a demo.
    - `index_writing_samples_task` — chunks and embeds your writing samples into
      `document_embeddings` for later retrieval.
 
-   If the Dramatiq worker isn't running, these jobs sit queued in Redis until a
-   worker starts. The dashboard will show "still being processed" until then.
+   Both run automatically, right after the response is sent — the dashboard
+   briefly shows "still being processed" until they finish (usually a few
+   seconds, since each is a handful of LLM calls plus embedding/DB writes).
 
 4. **`/dashboard`** — your "Desk". Shows your Voice DNA summary (once processed)
    and your manuscripts.
@@ -382,7 +383,7 @@ a demo.
      - **Chat**: freeform conversation with "The Scribe" — it has your full voice
        brief as system context.
    - Content autosaves 2 seconds after you stop typing. **Export** downloads the
-     chapter (or full manuscript, from Manuscript Studio) as a `.docx`.
+     chapter (or full manuscript, from Manuscript Studio) as a `.docx` or `.pdf`.
 
 ---
 
@@ -408,11 +409,7 @@ narratable output at each step.
 cd backend && source venv/bin/activate
 uvicorn app.main:app --reload
 
-# Terminal 2 (optional but recommended — enables Voice DNA extraction)
-cd backend && source venv/bin/activate
-dramatiq app.workers.tasks
-
-# Terminal 3
+# Terminal 2
 cd backend && source venv/bin/activate
 python scripts/smoke_test.py
 ```
@@ -534,9 +531,10 @@ curl -N -s -X POST http://localhost:8000/api/generate/chapter \
 
 You should see a stream of `data: {"text": "..."}` chunks followed by `data: [DONE]`.
 
-**If Voice DNA hasn't finished processing yet** (no Dramatiq worker running), the
-voice brief falls back to raw onboarding answers — generation still works, just
-without the extracted signature phrases / cadence score / voice summary layered in.
+**If Voice DNA hasn't finished processing yet** (it runs right after onboarding
+completes, usually a few seconds), the voice brief falls back to raw onboarding
+answers. Generation still works, just without the extracted signature phrases,
+cadence score, and voice summary layered in.
 
 ### 3. UI walkthrough (for the recorded demo)
 
@@ -550,7 +548,7 @@ through the same journey in the UI, in this order — it maps directly onto the
    the **Live Voice Preview** stream on screen. This is the single most
    memorable moment in the demo — narrate what's happening ("it's drafting in
    real time, based only on what I've told it so far").
-3. **Dashboard** — show the Voice DNA summary populating (if the worker has run).
+3. **Dashboard** — show the Voice DNA summary populating (it processes automatically, in the background).
 4. **Voice Profile page** — show the full Voice DNA breakdown and the **Voice
    Evolution Timeline** — explain that this versions like commit history.
 5. **Testimony Vault** — add or show a testimony.
@@ -561,7 +559,7 @@ through the same journey in the UI, in this order — it maps directly onto the
    - Use **Weave In My Story** to show testimony retrieval in action.
    - Use **Suggest Scripture Anchor** to show the scripture index.
    - Briefly show the **Chat** tab.
-8. **Export** — download the `.docx` and show the formatted result.
+8. **Export** — download the `.docx` or `.pdf` and show the formatted result.
 
 Keep narration focused on *why* each piece exists (the voice brief, RAG
 retrieval, chapter memory) rather than just *what* it does — that's what
@@ -589,9 +587,8 @@ next highest-value additions.
 
 ```
 the-scribe/
-├── docker-compose.yml          # Local: Postgres+pgvector, Redis
+├── docker-compose.yml          # Local: Postgres+pgvector
 ├── backend/
-│   ├── Dockerfile               # Production image (API + worker share this)
 │   ├── Dockerfile                # Production container (used by Render)
 │   ├── app/
 │   │   ├── api/routes/          # auth, onboarding, projects, voice, generate, export
@@ -609,13 +606,15 @@ the-scribe/
 │   │   │   │                      #   voice match scoring
 │   │   │   ├── voice/embeddings.py # pgvector embedding + chunking
 │   │   │   ├── voice/timeline.py   # voice version snapshots + diffs
-│   │   │   └── export/docx_export.py
-│   │   ├── utils/jobs.py          # non-blocking background job dispatch + logging
-│   │   └── workers/tasks.py       # Dramatiq background jobs
+│   │   │   └── export/               # docx_export.py, pdf_export.py
+│   │   ├── utils/jobs.py          # in-process background job dispatch + logging
+│   │   └── workers/tasks.py       # background tasks (FastAPI BackgroundTasks,
+│   │                               #   no separate worker/broker — see file docstring)
 │   ├── alembic/                   # migrations (0001_initial_schema creates
 │   │                               #   everything incl. pgvector index)
 │   └── scripts/
 │       ├── seed_scriptures.py
+│       ├── data/kjv_verses.json   # full public-domain KJV Bible (seed data)
 │       └── smoke_test.py          # end-to-end demo/test script
 └── frontend/
     ├── vercel.json                # SPA rewrites for React Router on Vercel
@@ -650,15 +649,16 @@ in `frontend/src/styles/globals.css`.
 
 - **Auth** is a simple email/password + JWT implementation (no email verification,
   password reset, or OAuth). Fine for a demo; would need hardening for production.
-- **Scripture index** is seeded with 15 well-known apostolic/prophetic verses
-  (`backend/scripts/seed_scriptures.py`). The scripture-suggest endpoint currently
-  asks Claude to return verses directly rather than querying this table — wiring
-  the suggestion endpoint to query `scriptures` first (and fall back to Claude only
-  for thematic matching) is a natural next step.
+- **Scripture index** is seeded with 15 hand-curated NKJV verses plus the full
+  public-domain KJV Bible (`backend/scripts/seed_scriptures.py`, 31,102 verses
+  total). NKJV is copyrighted and not cleared for bulk storage at this scale,
+  so the LLM in `/scripture-suggest` only ever proposes a reference; the real
+  verse text always comes from this table, and any reference that doesn't
+  resolve to a real verse is silently dropped rather than returned.
 - **Embeddings** use `sentence-transformers` (`all-MiniLM-L6-v2`, 384-dim) running
   locally on CPU — fine for demo-scale data. Locally, the first embedding call
   downloads the model (~90MB); the production `Dockerfile` pre-downloads it at
-  build time so the deployed API/worker never pay this cost at request time.
+  build time so the deployed API never pays this cost at request time.
 - **LLM provider**: by default the app rotates across Ollama, Groq, and
   Anthropic, or can be pinned to one via `LLM_PROVIDER` in `.env` — see
   [LLM provider: rotation, or pin to one](#llm-provider-rotation-or-pin-to-one)
@@ -666,11 +666,14 @@ in `frontend/src/styles/globals.css`.
   so cost/latency figures for Groq generations in `generation_logs` are
   estimates (word-count based), not exact; Ollama generations report real
   usage from the local API's `done` response.
-- **DOCX export** produces a clean, publisher-style manuscript but doesn't yet
-  handle embedded images or a generated table of contents.
-- **No PDF export** yet — only `.docx`.
-- Background jobs degrade gracefully if Redis/Dramatiq aren't running (onboarding
-  still completes), but Voice DNA won't populate until a worker processes the queue.
+- **Export** produces a clean, publisher-style manuscript as `.docx` or `.pdf`
+  (`backend/app/services/export/`), both with a real table of contents for
+  multi-chapter exports (a Word field for docx, resolved page numbers for
+  pdf). Neither handles embedded images, but that isn't a real gap yet either:
+  there's no way to add an image to a chapter anywhere in the app.
+- Background jobs (voice DNA extraction, embedding indexing, chapter
+  summaries) run in-process via FastAPI `BackgroundTasks`, not a separate
+  worker or queue. See [Architecture](#architecture) and `app/workers/tasks.py`.
 
 ---
 
@@ -681,7 +684,7 @@ jobs (voice DNA, embeddings, sermon ingestion) run in-process via FastAPI
 `BackgroundTasks` — there is no separate worker service or Redis dependency.
 A single Render web service is all you need on the backend.
 
-### 1. Database — Supabase (required: pgvector)
+### 1. Database: Supabase (required: pgvector)
 
 Create a free project at [supabase.com](https://supabase.com). pgvector is
 enabled by default. Under **Project Settings → Database → Connection string**,

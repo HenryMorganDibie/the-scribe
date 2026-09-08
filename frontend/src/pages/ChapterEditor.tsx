@@ -337,13 +337,13 @@ export default function ChapterEditor() {
     }
   }
 
-  const handleExportChapter = async () => {
+  const handleExportChapter = async (format: 'docx' | 'pdf') => {
     try {
-      const res = await api.post(`/export/chapter/${chapterId}`, {}, { responseType: 'blob' })
+      const res = await api.post(`/export/chapter/${chapterId}?format=${format}`, {}, { responseType: 'blob' })
       const url = window.URL.createObjectURL(new Blob([res.data]))
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', `chapter-${chapter?.chapter_number}-${chapter?.title.toLowerCase().replace(/\s+/g, '-')}.docx`)
+      link.setAttribute('download', `chapter-${chapter?.chapter_number}-${chapter?.title.toLowerCase().replace(/\s+/g, '-')}.${format}`)
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -372,8 +372,11 @@ export default function ChapterEditor() {
               {chapter.intent && <p className="text-study-300 mt-1 text-sm">{chapter.intent}</p>}
             </div>
             <div className="flex gap-2 flex-shrink-0">
-              <button onClick={handleExportChapter} className="btn-secondary text-sm flex items-center gap-1.5">
-                <Download size={14} /> Export
+              <button onClick={() => handleExportChapter('docx')} className="btn-secondary text-sm flex items-center gap-1.5">
+                <Download size={14} /> Export .docx
+              </button>
+              <button onClick={() => handleExportChapter('pdf')} className="btn-secondary text-sm flex items-center gap-1.5">
+                <Download size={14} /> Export .pdf
               </button>
               <button onClick={manualSave} disabled={saving} className="btn-secondary text-sm flex items-center gap-1.5">
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}

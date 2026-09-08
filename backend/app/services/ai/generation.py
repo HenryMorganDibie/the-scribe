@@ -15,6 +15,7 @@ from app.models import VoiceProfile, DocumentEmbedding, Testimony, Scripture, Ch
 from app.services.voice.embeddings import EmbeddingService
 from app.services.ai.llm_client import get_llm_client, estimate_cost
 from app.services.ai.json_utils import strip_json_fences
+from app.services.scripture_lookup import filter_verified_anchor_scriptures
 
 import structlog
 
@@ -303,6 +304,11 @@ async def extract_voice_dna(profile: VoiceProfile, db: AsyncSession) -> dict:
     """
     Background job: extract voice DNA from writing samples.
     Returns structured voice data to update the profile.
+
+    `anchor_scriptures` in the result is verified against the real Scripture
+    index before it's returned: an extracted ref that doesn't resolve to a
+    real verse (the model inventing a citation that isn't actually in the
+    writing samples) is dropped rather than stored on the profile.
     """
     samples = profile.writing_samples or []
     if not samples:
@@ -335,7 +341,10 @@ Return ONLY valid JSON. No markdown, no explanation."""
     raw = result.text.strip()
     try:
         text = strip_json_fences(raw)
-        return json.loads(text)
+        dna = json.loads(text)
+        if dna.get("anchor_scriptures"):
+            dna["anchor_scriptures"] = await filter_verified_anchor_scriptures(dna["anchor_scriptures"], db)
+        return dna
     except Exception as e:
         logger.warning(
             "voice_dna_extraction_parse_failed",

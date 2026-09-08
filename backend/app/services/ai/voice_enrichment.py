@@ -1,7 +1,10 @@
 """Extract voice DNA from arbitrary text and additively merge it into a VoiceProfile."""
 import json
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.services.ai.llm_client import get_llm_client
 from app.services.ai.json_utils import strip_json_fences
+from app.services.scripture_lookup import filter_verified_anchor_scriptures
 
 
 def _parse_dna_json(raw: str) -> dict:
@@ -13,8 +16,14 @@ def _parse_dna_json(raw: str) -> dict:
         return {}
 
 
-async def extract_dna_from_text(text: str) -> dict:
-    """Run the voice-DNA extraction prompt over a transcript and return structured DNA."""
+async def extract_dna_from_text(text: str, db: AsyncSession) -> dict:
+    """Run the voice-DNA extraction prompt over a transcript and return structured DNA.
+
+    `anchor_scriptures` in the result is verified against the real Scripture
+    index before it's returned: an extracted ref that doesn't resolve to a
+    real verse (the model inventing a citation that isn't actually in the
+    transcript) is dropped rather than stored on the profile.
+    """
     prompt = f"""Analyze this writing/sermon transcript from a Christian author and extract their voice DNA.
 
 TRANSCRIPT:
@@ -31,7 +40,10 @@ Return a JSON object with exactly these keys:
 
 Return ONLY valid JSON. No markdown, no explanation."""
     result = await get_llm_client().complete(messages=[{"role": "user", "content": prompt}], max_tokens=2000)
-    return _parse_dna_json(result.text)
+    dna = _parse_dna_json(result.text)
+    if dna.get("anchor_scriptures"):
+        dna["anchor_scriptures"] = await filter_verified_anchor_scriptures(dna["anchor_scriptures"], db)
+    return dna
 
 
 def merge_voice_dna(profile, new_dna: dict) -> dict:

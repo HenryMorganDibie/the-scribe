@@ -1,5 +1,5 @@
 """
-Export service — generates .docx manuscripts from chapter HTML content.
+Export service. Generates .docx manuscripts from chapter HTML content.
 """
 import io
 import re
@@ -7,7 +7,43 @@ from typing import List, Optional
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from html.parser import HTMLParser
+
+
+def _add_field(paragraph, instr_text: str, placeholder: str):
+    """
+    Insert a raw Word field code (e.g. TOC) into a paragraph. Word populates
+    the field's real content in place of `placeholder` when the document is
+    opened (or on the user's next F9 field-update). python-docx has no
+    native field API, so this builds the field XML directly.
+    """
+    run = paragraph.add_run()
+    r = run._r
+
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    r.append(begin)
+
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = instr_text
+    r.append(instr)
+
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    r.append(separate)
+
+    placeholder_text = OxmlElement("w:t")
+    placeholder_text.text = placeholder
+    r.append(placeholder_text)
+
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    r.append(end)
+
+    return run
 
 
 def html_to_plain(html: str) -> str:
@@ -163,6 +199,29 @@ def create_manuscript_docx(
 
     doc.add_page_break()
 
+    # Table of contents. Skipped for a single-chapter export, where a TOC
+    # is meaningless. Chapter titles are given Word's real "Heading 1" style
+    # (font/size overridden below to match this doc's existing look) so the
+    # TOC field can actually find them; Word populates real page numbers
+    # when the file is opened or on the next field update (Ctrl+A, F9).
+    # Unlike reportlab's PDF path, page numbers can't be resolved at
+    # generation time here since Word owns the final layout, not this script.
+    if len(chapters) > 1:
+        toc_heading = doc.add_paragraph()
+        toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        toc_run = toc_heading.add_run("Table of Contents")
+        toc_run.bold = True
+        toc_run.font.size = Pt(16)
+        toc_run.font.name = 'Times New Roman'
+
+        toc_para = doc.add_paragraph()
+        _add_field(
+            toc_para,
+            r'TOC \o "1-1" \h \z \u',
+            "(Table of Contents: right-click and choose 'Update Field' to populate)",
+        )
+        doc.add_page_break()
+
     # Chapters
     for chapter in chapters:
         # Chapter heading
@@ -172,7 +231,7 @@ def create_manuscript_docx(
         ch_run.font.size = Pt(11)
         ch_run.font.name = 'Times New Roman'
 
-        title_p = doc.add_paragraph()
+        title_p = doc.add_paragraph(style='Heading 1')
         title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         t_run = title_p.add_run(chapter['title'].upper())
         t_run.bold = True

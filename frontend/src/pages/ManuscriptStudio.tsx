@@ -76,7 +76,7 @@ export default function ManuscriptStudio() {
   const [showForm, setShowForm] = useState(false)
   const [chTitle, setChTitle] = useState('')
   const [chIntent, setChIntent] = useState('')
-  const [exporting, setExporting] = useState(false)
+  const [exporting, setExporting] = useState<'docx' | 'pdf' | null>(null)
   const handleDeleteChapter = async (chapterId: string) => {
     if (!project) return
     const ch = project.chapters.find((c) => c.id === chapterId)
@@ -142,14 +142,14 @@ export default function ManuscriptStudio() {
     }
   }
 
-  const handleExport = async () => {
-    setExporting(true)
+  const handleExport = async (format: 'docx' | 'pdf') => {
+    setExporting(format)
     try {
-      const res = await api.post(`/export/project/${id}`, {}, { responseType: 'blob' })
+      const res = await api.post(`/export/project/${id}?format=${format}`, {}, { responseType: 'blob' })
       const url = window.URL.createObjectURL(new Blob([res.data]))
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', `${project?.title.toLowerCase().replace(/\s+/g, '-')}-manuscript.docx`)
+      link.setAttribute('download', `${project?.title.toLowerCase().replace(/\s+/g, '-')}-manuscript.${format}`)
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -157,7 +157,7 @@ export default function ManuscriptStudio() {
     } catch {
       toast.error('Export failed')
     } finally {
-      setExporting(false)
+      setExporting(null)
     }
   }
 
@@ -179,8 +179,11 @@ export default function ManuscriptStudio() {
           <Link to={`/projects/${project.id}/companion-chat`} className="btn-secondary flex items-center gap-2 text-sm">
             <MessageCircle size={16} /> Companion Chat
           </Link>
-          <button onClick={handleExport} disabled={exporting} className="btn-secondary flex items-center gap-2 text-sm">
-            <Download size={16} /> {exporting ? 'Exporting...' : 'Export .docx'}
+          <button onClick={() => handleExport('docx')} disabled={!!exporting} className="btn-secondary flex items-center gap-2 text-sm">
+            <Download size={16} /> {exporting === 'docx' ? 'Exporting...' : 'Export .docx'}
+          </button>
+          <button onClick={() => handleExport('pdf')} disabled={!!exporting} className="btn-secondary flex items-center gap-2 text-sm">
+            <Download size={16} /> {exporting === 'pdf' ? 'Exporting...' : 'Export .pdf'}
           </button>
           <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2 text-sm">
             {showForm ? <X size={16} /> : <Plus size={16} />}
