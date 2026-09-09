@@ -9,6 +9,7 @@ from pydantic import BaseModel, EmailStr
 
 from app.db.session import get_db
 from app.models import User, VoiceProfile
+from app.core.config import settings
 from app.core.security import hash_password, verify_password, create_access_token, get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
