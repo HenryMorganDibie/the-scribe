@@ -28,6 +28,7 @@ interface ProjectDetail {
   theme?: string
   target_chapters: number
   chapters: Chapter[]
+  source_sermons: { id: string; title: string }[]
 }
 
 const statusColors: Record<string, string> = {
@@ -164,6 +165,11 @@ export default function ManuscriptStudio() {
   if (loading) return <div className="p-8 text-study-300">Loading manuscript...</div>
   if (!project) return <div className="p-8 text-study-300">Manuscript not found.</div>
 
+  const completedChapters = project.chapters.filter((chapter) => chapter.status === 'complete').length
+  const totalWords = project.chapters.reduce((sum, chapter) => sum + (chapter.word_count || 0), 0)
+  const chapterProgress = Math.min(100, Math.round((completedChapters / Math.max(project.target_chapters, 1)) * 100))
+  const nextChapter = project.chapters.find((chapter) => chapter.status === 'draft') || project.chapters.find((chapter) => chapter.status !== 'complete')
+
   return (
     <div className="px-4 py-6 md:p-8 max-w-4xl mx-auto">
       <Link to="/projects" className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-4">
@@ -193,6 +199,26 @@ export default function ManuscriptStudio() {
       </div>
 
       {project.theme && <p className="text-study-300 mb-6">{project.theme}</p>}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="card p-4 md:col-span-2">
+          <div className="flex items-center justify-between text-sm mb-2"><span className="font-medium">Manuscript progress</span><span className="text-seal">{completedChapters}/{project.target_chapters} chapters complete</span></div>
+          <div className="h-2 bg-paper-200 rounded-full overflow-hidden"><div className="h-full bg-seal transition-all" style={{ width: `${chapterProgress}%` }} /></div>
+          <p className="text-xs text-study-300 mt-2">{totalWords.toLocaleString()} words drafted · {nextChapter ? `Next: ${nextChapter.title}` : 'Your manuscript is ready to review and export.'}</p>
+        </div>
+        <div className="card p-4">
+          <p className="text-xs uppercase tracking-wide text-study-300 mb-2">Next best step</p>
+          {nextChapter ? <Link to={`/projects/${project.id}/chapters/${nextChapter.id}`} className="text-sm text-seal hover:underline">{nextChapter.status === 'draft' ? `Draft “${nextChapter.title}”` : `Finish “${nextChapter.title}”`}</Link> : <span className="text-sm text-seal">Export your manuscript</span>}
+        </div>
+      </div>
+
+      {project.source_sermons.length > 0 && (
+        <div className="card p-4 mb-6">
+          <p className="text-xs uppercase tracking-wide text-study-300 mb-2">Book sources</p>
+          <p className="text-sm text-study-400 mb-2">This blueprint was grounded in these sermons. Generation still uses your voice profile and verified scripture references.</p>
+          <div className="flex flex-wrap gap-2">{project.source_sermons.map((sermon) => <span key={sermon.id} className="text-xs bg-seal-50 border border-seal-200 text-seal-400 rounded-full px-3 py-1">{sermon.title}</span>)}</div>
+        </div>
+      )}
 
       {showForm && (
         <form onSubmit={handleAddChapter} className="card p-6 mb-6 space-y-4 animate-fade-in-up">

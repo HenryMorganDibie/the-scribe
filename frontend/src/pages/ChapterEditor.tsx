@@ -34,6 +34,17 @@ interface ChatMessage {
   content: string
 }
 
+interface VoiceCheck {
+  score: number
+  grade: string
+  feedback: string
+  cadence_score?: number
+  cadence_delta?: number
+  phrase_matches?: string[]
+  phrase_usage_rate?: number
+  scripture_matches?: string[]
+}
+
 type SidebarTab = 'actions' | 'chat'
 
 export default function ChapterEditor() {
@@ -43,7 +54,7 @@ export default function ChapterEditor() {
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [testimonies, setTestimonies] = useState<Testimony[]>([])
-  const [voiceCheck, setVoiceCheck] = useState<{ score: number; grade: string; feedback: string } | null>(null)
+  const [voiceCheck, setVoiceCheck] = useState<VoiceCheck | null>(null)
   const [mobileAiOpen, setMobileAiOpen] = useState(false)
   const [scriptureSuggestions, setScriptureSuggestions] = useState<any[]>([])
   const [tab, setTab] = useState<SidebarTab>('actions')
@@ -494,6 +505,12 @@ export default function ChapterEditor() {
                   <span className="text-xs text-study-300">{voiceCheck.grade}</span>
                 </div>
                 <p className="text-study-400 text-xs">{voiceCheck.feedback}</p>
+                <div className="mt-3 pt-3 border-t border-seal-100 space-y-2 text-xs text-study-400">
+                  <p><span className="font-medium text-seal-400">Cadence:</span> {voiceCheck.cadence_delta === undefined ? 'Run a fresh check to compare cadence.' : `${voiceCheck.cadence_delta >= 0 ? 'Slightly more flowing' : 'Slightly more punchy'} than your baseline`}</p>
+                  {voiceCheck.phrase_matches && voiceCheck.phrase_matches.length > 0 && <p><span className="font-medium text-seal-400">Voice signals found:</span> {voiceCheck.phrase_matches.join(' · ')}</p>}
+                  {voiceCheck.scripture_matches && voiceCheck.scripture_matches.length > 0 && <p><span className="font-medium text-seal-400">Anchor scriptures used:</span> {voiceCheck.scripture_matches.join(' · ')}</p>}
+                  {(!voiceCheck.phrase_matches || voiceCheck.phrase_matches.length === 0) && (!voiceCheck.scripture_matches || voiceCheck.scripture_matches.length === 0) && <p>Check the chapter after adding more of your own language or scripture anchors to see evidence here.</p>}
+                </div>
               </div>
             )}
 

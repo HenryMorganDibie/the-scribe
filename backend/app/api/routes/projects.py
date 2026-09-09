@@ -3,15 +3,16 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 
 from app.db.session import get_db
-from app.models import User, Project, Chapter
+from app.models import User, Project, Chapter, Sermon, VoiceProfile
 from app.core.security import get_current_user
 from app.api.ownership import get_owned_chapter, get_owned_project
 from app.utils.jobs import fire_background_job
 from app.services.ai.companion_chat import companion_chat_stream, save_message, get_history
+from app.services.ai.sermon_book import build_sermon_book_plan
 
 router = APIRouter(tags=["projects"])
 
@@ -33,6 +34,13 @@ class ProjectUpdate(BaseModel):
     status: Optional[str] = None
 
 
+class SermonBookCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=160)
+    target_reader: str = Field(default="", max_length=1000)
+    sermon_ids: List[str] = Field(min_length=1, max_length=10)
+    target_chapters: int = Field(default=8, ge=3, le=20)
+
+
 @router.get("/projects")
 async def list_projects(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Project).where(Project.user_id == current_user.id).order_by(Project.updated_at.desc()))
@@ -50,6 +58,72 @@ async def create_project(body: ProjectCreate, current_user: User = Depends(get_c
     return {"id": project.id, "title": project.title, "genre": project.genre, "status": project.status}
 
 
+@router.post("/projects/from-sermons", status_code=201)
+async def create_project_from_sermons(
+    body: SermonBookCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a chapter-by-chapter book blueprint grounded in selected sermons."""
+    requested_ids = list(dict.fromkeys(body.sermon_ids))
+    result = await db.execute(
+        select(Sermon).where(
+            Sermon.id.in_(requested_ids),
+            Sermon.user_id == current_user.id,
+            Sermon.status == "complete",
+        )
+    )
+    sermons = result.scalars().all()
+    if len(sermons) != len(requested_ids):
+        raise HTTPException(status_code=400, detail="Select only completed sermons from your library")
+
+    profile_result = await db.execute(select(VoiceProfile).where(VoiceProfile.user_id == current_user.id))
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=400, detail="Complete your voice profile before building a book")
+
+    try:
+        plan = await build_sermon_book_plan(
+            title=body.title,
+            target_reader=body.target_reader,
+            target_chapters=body.target_chapters,
+            theological_lens=profile.theological_lens,
+            preferred_translation=profile.preferred_translation,
+            guardrails=profile.theological_guardrails,
+            sermons=sermons,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    project = Project(
+        user_id=current_user.id,
+        title=body.title,
+        genre="teaching",
+        theme=plan["theme"] or f"A book for {body.target_reader}".strip(),
+        target_chapters=len(plan["chapters"]),
+        source_sermon_ids=requested_ids,
+    )
+    db.add(project)
+    await db.flush()
+    for position, chapter_data in enumerate(plan["chapters"]):
+        db.add(Chapter(
+            project_id=project.id,
+            user_id=current_user.id,
+            position=position,
+            chapter_number=position + 1,
+            **chapter_data,
+        ))
+    await db.commit()
+    await db.refresh(project)
+    return {
+        "id": project.id,
+        "title": project.title,
+        "theme": project.theme,
+        "chapter_count": len(plan["chapters"]),
+        "source_sermons": [{"id": sermon.id, "title": sermon.title} for sermon in sermons],
+    }
+
+
 @router.get("/projects/{project_id}")
 async def get_project(project_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     project = await get_owned_project(project_id, current_user.id, db)
@@ -61,10 +135,20 @@ async def get_project(project_id: str, current_user: User = Depends(get_current_
         ).order_by(Chapter.position)
     )
     chapters = ch_result.scalars().all()
+    source_sermons = []
+    if project.source_sermon_ids:
+        sermon_result = await db.execute(
+            select(Sermon).where(
+                Sermon.id.in_(project.source_sermon_ids),
+                Sermon.user_id == current_user.id,
+            )
+        )
+        source_sermons = [{"id": sermon.id, "title": sermon.title} for sermon in sermon_result.scalars().all()]
 
     return {
         "id": project.id, "title": project.title, "genre": project.genre,
         "theme": project.theme, "status": project.status, "target_chapters": project.target_chapters,
+        "source_sermons": source_sermons,
         "chapters": [{"id": c.id, "title": c.title, "chapter_number": c.chapter_number,
                       "status": c.status, "word_count": c.word_count, "position": c.position,
                       "voice_match_score": c.voice_match_score} for c in chapters],

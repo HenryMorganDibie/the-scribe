@@ -61,6 +61,7 @@ class VoiceProfile(Base):
     target_audience: Mapped[Optional[str]] = mapped_column(Text)
     tone_preferences: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))  # teaching|exhortation|narrative|devotional
     preferred_translation: Mapped[Optional[str]] = mapped_column(String, default="NKJV")
+    theological_guardrails: Mapped[Optional[List[str]]] = mapped_column(JSONB)
 
     # AI-extracted voice DNA
     signature_phrases: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
@@ -208,6 +209,7 @@ class Project(Base):
     theme: Mapped[Optional[str]] = mapped_column(Text)
     target_chapters: Mapped[int] = mapped_column(Integer, default=10)
     status: Mapped[str] = mapped_column(String, default="active")  # active|complete|archived
+    source_sermon_ids: Mapped[Optional[List[str]]] = mapped_column(JSONB)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -33,6 +33,7 @@ async def snapshot_voice(
     snapshot = {
         "theological_lens": profile.theological_lens,
         "signature_phrases": profile.signature_phrases or [],
+        "theological_guardrails": profile.theological_guardrails or [],
         "anchor_scriptures": profile.anchor_scriptures or [],
         "cadence_score": profile.cadence_score,
         "style_tags": profile.style_tags or [],

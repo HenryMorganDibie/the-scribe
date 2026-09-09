@@ -45,6 +45,7 @@ async def build_voice_brief(profile: VoiceProfile, chapter_context: Optional[str
     tags = profile.style_tags or []
     tones = profile.tone_preferences or []
     translation = profile.preferred_translation or "NKJV"
+    guardrails = profile.theological_guardrails or []
 
     samples_text = ""
     if profile.writing_samples:
@@ -61,6 +62,9 @@ THEOLOGICAL LENS: {profile.theological_lens or 'Spirit-filled'}
 MINISTRY BACKGROUND: {profile.ministry_background or 'Not specified'}
 TARGET AUDIENCE: {profile.target_audience or 'Believers seeking deeper faith'}
 PREFERRED BIBLE TRANSLATION: {translation}
+
+THEOLOGICAL GUARDRAILS (never contradict these):
+{chr(10).join(f'  • {rule}' for rule in guardrails) if guardrails else '  • Remain faithful to the stated theological lens and avoid asserting uncertain doctrine as fact.'}
 
 WRITING TONES (ranked by prominence):
 {chr(10).join(f'  • {t}' for t in tones) if tones else '  • teaching, exhortation'}
@@ -100,6 +104,7 @@ RULES:
 3. Never use generic Christian phrases that don't appear in their samples.
 4. Match their paragraph length, hook style, and closing cadence.
 5. If they use rhetorical questions — use them. If they don't — don't.
+6. Respect the theological guardrails above. If a request conflicts with them, flag the tension instead of presenting the conflict as this author's belief.
 ═══════════════════════════════════════
 """
     return brief

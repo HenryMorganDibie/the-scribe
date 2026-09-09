@@ -88,6 +88,7 @@ const STEPS: StepConfig[] = [
 ]
 
 export default function Onboarding() {
+  const [chosenPath, setChosenPath] = useState(false)
   const [stepIndex, setStepIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, any>>({
     tone_preferences: [],
@@ -107,6 +108,28 @@ export default function Onboarding() {
   const previewAbortRef = useRef<boolean>(false)
 
   const currentValue = answers[step.key]
+
+  const startWithSermons = async () => {
+    setSubmitting(true)
+    try {
+      await api.post('/onboarding/complete', {
+        data: {
+          theological_lens: 'To be learned from my sermons',
+          preferred_translation: 'NKJV',
+          tone_preferences: [],
+          writing_samples: [],
+          signature_phrases: [],
+          anchor_scriptures: [],
+        },
+      })
+      await fetchMe()
+      toast.success('Upload your sermons and The Scribe will begin learning your voice.')
+      navigate('/sermons')
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Unable to start sermon-first setup')
+      setSubmitting(false)
+    }
+  }
 
   const isStepValid = () => {
     if (step.type === 'multiselect' || step.type === 'tags' || step.type === 'samples') {
@@ -195,6 +218,33 @@ export default function Onboarding() {
       // Triggered via handleNext already
     }
   }, [stepIndex])
+
+  if (!chosenPath) {
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-3xl">
+          <div className="mb-10"><QuillLogo size="lg" animate={false} /></div>
+          <p className="text-seal text-sm font-medium mb-2">Start your first manuscript</p>
+          <h1 className="font-display text-display-md font-semibold mb-3">How would you like The Scribe to learn your voice?</h1>
+          <p className="text-study-300 mb-8 max-w-2xl">Choose the fastest path now. You can always enrich your profile later.</p>
+          <div className="grid md:grid-cols-2 gap-5">
+            <button onClick={startWithSermons} disabled={submitting} className="card p-6 text-left hover:border-seal transition-colors disabled:opacity-50">
+              <Sparkles size={24} className="text-seal mb-4" />
+              <h2 className="font-display text-xl font-semibold mb-2">I have sermons</h2>
+              <p className="text-sm text-study-300 mb-4">Upload completed sermons first. The Scribe will learn recurring language, scriptures, and stories, then help turn them into a book.</p>
+              <span className="text-sm text-seal font-medium flex items-center gap-2">{submitting ? <Loader2 size={15} className="animate-spin" /> : null} Start with sermons</span>
+            </button>
+            <button onClick={() => setChosenPath(true)} className="card p-6 text-left hover:border-seal transition-colors">
+              <ChevronRight size={24} className="text-seal mb-4" />
+              <h2 className="font-display text-xl font-semibold mb-2">Interview me</h2>
+              <p className="text-sm text-study-300 mb-4">Share your ministry background, style, signature phrases, scriptures, and writing samples in a guided interview.</p>
+              <span className="text-sm text-seal font-medium">Begin voice interview</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-paper flex flex-col">

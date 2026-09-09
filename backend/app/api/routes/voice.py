@@ -24,6 +24,7 @@ class VoiceProfileUpdate(BaseModel):
     cadence_score: Optional[float] = None
     style_tags: Optional[List[str]] = None
     voice_summary: Optional[str] = None
+    theological_guardrails: Optional[List[str]] = None
 
 
 @router.get("/voice-profile")
@@ -41,6 +42,7 @@ async def get_voice_profile(current_user: User = Depends(get_current_user), db: 
         "voice_summary": profile.voice_summary,
         "tone_preferences": profile.tone_preferences or [],
         "preferred_translation": profile.preferred_translation,
+        "theological_guardrails": profile.theological_guardrails or [],
     }
 
 

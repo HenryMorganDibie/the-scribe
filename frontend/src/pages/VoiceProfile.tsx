@@ -13,6 +13,7 @@ interface VoiceProfileData {
   voice_summary?: string
   tone_preferences?: string[]
   preferred_translation?: string
+  theological_guardrails?: string[]
 }
 
 interface VoiceVersion {
@@ -47,23 +48,27 @@ export default function VoiceProfile() {
   const [editSummary, setEditSummary] = useState('')
   const [editTranslation, setEditTranslation] = useState('')
   const [editPhrases, setEditPhrases] = useState('')
+  const [editGuardrails, setEditGuardrails] = useState('')
 
   const startEdit = () => {
     setEditSummary(profile?.voice_summary || '')
     setEditTranslation(profile?.preferred_translation || 'NKJV')
     setEditPhrases((profile?.signature_phrases || []).join('\n'))
+    setEditGuardrails((profile?.theological_guardrails || []).join('\n'))
     setEditing(true)
   }
 
   const saveEdit = async () => {
     try {
       const phrases = editPhrases.split('\n').map((p) => p.trim()).filter(Boolean)
+      const guardrails = editGuardrails.split('\n').map((rule) => rule.trim()).filter(Boolean)
       await api.put('/voice-profile', {
         voice_summary: editSummary,
         preferred_translation: editTranslation,
         signature_phrases: phrases,
+        theological_guardrails: guardrails,
       })
-      setProfile((prev) => prev ? { ...prev, voice_summary: editSummary, preferred_translation: editTranslation, signature_phrases: phrases } : prev)
+      setProfile((prev) => prev ? { ...prev, voice_summary: editSummary, preferred_translation: editTranslation, signature_phrases: phrases, theological_guardrails: guardrails } : prev)
       setEditing(false)
       toast.success('Voice profile updated')
     } catch {
@@ -130,6 +135,16 @@ export default function VoiceProfile() {
                 className="input-field w-full h-32 resize-none text-sm font-mono"
                 placeholder="What if • Let that sink in • There are seasons in life"
               />
+            </div>
+            <div>
+              <label className="block text-sm text-study-400 mb-1.5">Theological Guardrails (one per line)</label>
+              <textarea
+                value={editGuardrails}
+                onChange={(e) => setEditGuardrails(e.target.value)}
+                className="input-field w-full h-28 resize-none text-sm"
+                placeholder="Avoid presenting speculation as doctrine&#10;Keep salvation language consistent with my tradition"
+              />
+              <p className="text-xs text-study-300 mt-1">The Scribe applies these to every draft and flags conflicts instead of writing against them.</p>
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setEditing(false)} className="btn-secondary">Cancel</button>
@@ -220,6 +235,14 @@ export default function VoiceProfile() {
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {profile.theological_guardrails && profile.theological_guardrails.length > 0 && (
+            <div className="lg:col-span-3 card p-6">
+              <h2 className="font-display text-display-xs font-semibold mb-2">Theological Guardrails</h2>
+              <p className="text-sm text-study-300 mb-3">These author-defined boundaries are included in every generation.</p>
+              <ul className="space-y-2 text-sm text-study-400">{profile.theological_guardrails.map((rule, index) => <li key={`${rule}-${index}`} className="flex gap-2"><span className="text-seal">•</span>{rule}</li>)}</ul>
             </div>
           )}
         </div>
