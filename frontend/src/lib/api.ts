@@ -4,13 +4,23 @@ import axios from 'axios'
 // production builds default to the deployed backend and dev builds use localhost.
 const API_URL =
   import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? 'https://the-scribe.onrender.com/api' : 'http://localhost:8000/api')
+  (import.meta.env.PROD ? '/api' : 'http://localhost:8000/api')
 
-export const api = axios.create({ baseURL: API_URL })
+// The browser never stores the login cookie or bearer token. This value is a
+// short-lived CSRF secret kept in memory and sent only with state changes.
+let csrfToken: string | null = null
+
+export function setCsrfToken(token: string | null) {
+  csrfToken = token
+}
+
+export const api = axios.create({ baseURL: API_URL, withCredentials: true })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('scribe_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  const method = config.method?.toLowerCase()
+  if (csrfToken && method && !['get', 'head', 'options'].includes(method)) {
+    config.headers['X-CSRF-Token'] = csrfToken
+  }
   return config
 })
 
@@ -18,22 +28,15 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('scribe_token')
+      setCsrfToken(null)
+      localStorage.removeItem('scribe_token') // clears sessions from the pre-cookie release
       window.location.href = '/login'
     }
     return Promise.reject(err)
   }
 )
 
-/**
- * Stream an SSE endpoint, calling onChunk for each text delta.
- * Used for: chapter generation, continue, weave-story, chat, companion-chat.
- *
- * onEvent is called for any parsed JSON payload that has no `text` or
- * `error` key (e.g. companion-chat's final `{cited_chapter_ids: [...]}`
- * event) — onChunk only fires for text deltas, onEvent for everything else,
- * so existing callers that only pass onChunk are unaffected.
- */
+/** Stream an SSE endpoint while authenticating with the secure session cookie. */
 export async function streamSSE(
   path: string,
   body: object,
@@ -42,12 +45,12 @@ export async function streamSSE(
   onError?: (err: string) => void,
   onEvent?: (payload: any) => void
 ) {
-  const token = localStorage.getItem('scribe_token')
   const res = await fetch(`${API_URL}${path}`, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: token ? `Bearer ${token}` : '',
+      ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
     },
     body: JSON.stringify(body),
   })
@@ -61,7 +64,6 @@ export async function streamSSE(
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n\n')
     buffer = lines.pop() || ''
@@ -69,23 +71,16 @@ export async function streamSSE(
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue
       const data = line.slice(6)
-
       if (data === '[DONE]') {
         onDone?.()
         return
       }
-
       try {
         const parsed = JSON.parse(data)
-        if (parsed.error) {
-          onError?.(parsed.error)
-        } else if (parsed.text) {
-          onChunk(parsed.text)
-        } else {
-          onEvent?.(parsed)
-        }
+        if (parsed.error) onError?.(parsed.error)
+        else if (parsed.text) onChunk(parsed.text)
+        else onEvent?.(parsed)
       } catch {
-        // For onboarding preview, raw text chunks (not JSON)
         onChunk(data)
       }
     }

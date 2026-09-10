@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api } from '@/lib/api'
+import { api, setCsrfToken } from '@/lib/api'
 
 interface User {
   id: string
@@ -15,8 +15,14 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>
   signup: (email: string, password: string, fullName: string) => Promise<void>
   googleLogin: (credential: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   fetchMe: () => Promise<void>
+}
+
+function acceptLogin(res: { data: { csrf_token: string; user: User } }, set: (state: Partial<AuthState>) => void) {
+  localStorage.removeItem('scribe_token') // remove legacy browser-persisted JWTs
+  setCsrfToken(res.data.csrf_token)
+  set({ user: res.data.user, loading: false })
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -27,40 +33,38 @@ export const useAuthStore = create<AuthState>((set) => ({
     const form = new URLSearchParams()
     form.append('username', email)
     form.append('password', password)
-    const res = await api.post('/auth/login', form, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    })
-    localStorage.setItem('scribe_token', res.data.access_token)
-    set({ user: res.data.user })
+    const res = await api.post('/auth/login', form, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+    acceptLogin(res, set)
   },
 
   signup: async (email, password, fullName) => {
     const res = await api.post('/auth/signup', { email, password, full_name: fullName })
-    localStorage.setItem('scribe_token', res.data.access_token)
-    set({ user: res.data.user })
+    acceptLogin(res, set)
   },
 
   googleLogin: async (credential) => {
     const res = await api.post('/auth/google', { credential })
-    localStorage.setItem('scribe_token', res.data.access_token)
-    set({ user: res.data.user })
+    acceptLogin(res, set)
   },
 
-  logout: () => {
+  logout: async () => {
+    try {
+      await api.post('/auth/logout')
+    } catch {
+      // The local browser should still be logged out if the session expired.
+    }
+    setCsrfToken(null)
     localStorage.removeItem('scribe_token')
-    set({ user: null })
+    set({ user: null, loading: false })
   },
 
   fetchMe: async () => {
-    const token = localStorage.getItem('scribe_token')
-    if (!token) {
-      set({ loading: false })
-      return
-    }
     try {
       const res = await api.get('/auth/me')
+      setCsrfToken(res.data.csrf_token || null)
       set({ user: res.data, loading: false })
     } catch {
+      setCsrfToken(null)
       localStorage.removeItem('scribe_token')
       set({ user: null, loading: false })
     }

@@ -7,11 +7,25 @@ from typing import Optional
 from app.db.session import get_db
 from app.models import User, Sermon, DocumentEmbedding
 from app.core.security import get_current_user
+from app.core.config import settings
 from app.services.ingestion.pipeline import process_sermon
+from app.services.security.rate_limits import consume_user_quota
 
 router = APIRouter(prefix="/sermons", tags=["sermons"])
 
 _EXT_TO_TYPE = {"pdf": "pdf", "docx": "docx"}
+
+
+async def _read_upload_limited(file: UploadFile, limit: int) -> bytes:
+    """Read an upload in chunks and stop before it can exhaust API memory."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail=f"File is too large. Limit is {limit // (1024 * 1024)} MB.")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _serialize(s: Sermon) -> dict:
@@ -26,8 +40,8 @@ def _serialize(s: Sermon) -> dict:
 @router.post("", status_code=202)
 async def upload_sermon(
     background_tasks: BackgroundTasks,
-    title: str = Form(...),
-    text: Optional[str] = Form(None),
+    title: str = Form(..., max_length=160),
+    text: Optional[str] = Form(None, max_length=settings.MAX_PASTED_TEXT_CHARS),
     file: Optional[UploadFile] = File(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -62,9 +76,15 @@ async def upload_sermon(
             )
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: .{ext}")
-        file_bytes = await file.read()
+        file_bytes = await _read_upload_limited(file, settings.MAX_UPLOAD_BYTES)
+        if source_type == "pdf" and not file_bytes.startswith(b"%PDF-"):
+            raise HTTPException(status_code=400, detail="The uploaded file is not a valid PDF.")
+        if source_type == "docx" and not file_bytes.startswith(b"PK"):
+            raise HTTPException(status_code=400, detail="The uploaded file is not a valid DOCX file.")
     else:
         source_type = "text"
+
+    await consume_user_quota(db, current_user.id, "sermon_upload", settings.SERMON_DAILY_UPLOAD_LIMIT)
 
     sermon = Sermon(
         user_id=current_user.id, title=title, source_type=source_type,

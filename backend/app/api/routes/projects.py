@@ -8,11 +8,13 @@ from typing import Optional, List
 
 from app.db.session import get_db
 from app.models import User, Project, Chapter, Sermon, VoiceProfile
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.api.ownership import get_owned_chapter, get_owned_project
 from app.utils.jobs import fire_background_job
 from app.services.ai.companion_chat import companion_chat_stream, save_message, get_history
 from app.services.ai.sermon_book import build_sermon_book_plan
+from app.services.security.rate_limits import consume_user_quota
 
 router = APIRouter(tags=["projects"])
 
@@ -81,6 +83,7 @@ async def create_project_from_sermons(
     profile = profile_result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=400, detail="Complete your voice profile before building a book")
+    await consume_user_quota(db, current_user.id, "ai_request", settings.AI_DAILY_REQUEST_LIMIT)
 
     try:
         plan = await build_sermon_book_plan(
@@ -319,7 +322,7 @@ async def delete_chapter(project_id: str, chapter_id: str, current_user: User = 
 # /generate/chat). See app/services/ai/companion_chat.py.
 
 class CompanionChatRequest(BaseModel):
-    message: str
+    message: str = Field(min_length=1, max_length=5_000)
 
 
 @router.get("/projects/{project_id}/companion-chat/history")
@@ -329,6 +332,7 @@ async def companion_chat_history(
     db: AsyncSession = Depends(get_db),
 ):
     await get_owned_project(project_id, current_user.id, db)
+    await consume_user_quota(db, current_user.id, "ai_request", settings.AI_DAILY_REQUEST_LIMIT)
 
     messages = await get_history(project_id, db)
     return [

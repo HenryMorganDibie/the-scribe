@@ -7,7 +7,7 @@ Run in prod:    uvicorn app.main:app --host 0.0.0.0 --port $PORT
 """
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import structlog
@@ -59,8 +59,8 @@ app = FastAPI(
     title="The Scribe API",
     description="AI writing assistant for Christian authors — personalized voice, manuscript generation.",
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
+    docs_url=None if settings.ENVIRONMENT == "production" else "/api/docs",
+    redoc_url=None if settings.ENVIRONMENT == "production" else "/api/redoc",
     lifespan=lifespan,
 )
 
@@ -76,6 +76,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Defense-in-depth headers and an early cap on oversized requests."""
+    content_length = request.headers.get("content-length")
+    if content_length and request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            if int(content_length) > settings.MAX_UPLOAD_BYTES + 1024 * 1024:
+                return JSONResponse(status_code=413, content={"detail": "Request body is too large."})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header."})
+
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    if settings.ENVIRONMENT == "production":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 
 # Routes
 app.include_router(auth.router, prefix="/api")
@@ -97,8 +121,6 @@ async def health():
     return {
         "status": "ok",
         "service": "the-scribe-api",
-        "environment": settings.ENVIRONMENT,
-        "llm_provider": settings.LLM_PROVIDER,
     }
 
 
@@ -109,6 +131,10 @@ async def health_db():
     Useful for confirming DATABASE_URL is correctly wired after deployment.
     """
     from sqlalchemy import text
+    from fastapi import HTTPException
+
+    if settings.ENVIRONMENT == "production":
+        raise HTTPException(status_code=404, detail="Not found")
 
     try:
         async with engine.connect() as conn:

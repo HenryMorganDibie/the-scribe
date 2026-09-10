@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 import json
 
@@ -22,6 +22,7 @@ from app.services.ai.generation import (
 from app.services.ai.llm_client import get_llm_client
 from app.services.scripture_lookup import fetch_scripture_text
 from app.core.config import settings
+from app.services.security.rate_limits import consume_user_quota
 
 router = APIRouter(prefix="/generate", tags=["generation"])
 
@@ -40,30 +41,34 @@ class GenerateChapterRequest(BaseModel):
 
 class ContinueRequest(BaseModel):
     chapter_id: str
-    cursor_text: str  # text up to cursor position
-    instruction: Optional[str] = None
+    cursor_text: str = Field(max_length=12_000)  # text up to cursor position
+    instruction: Optional[str] = Field(default=None, max_length=1_000)
 
 
 class WeaveStoryRequest(BaseModel):
     chapter_id: str
     testimony_id: str
-    cursor_text: str
+    cursor_text: str = Field(max_length=12_000)
 
 
 class VoiceCheckRequest(BaseModel):
     chapter_id: str
-    text: str
+    text: str = Field(max_length=30_000)
 
 
 class ScriptureSuggestRequest(BaseModel):
     chapter_id: str
-    context: str  # current paragraph or chapter theme
+    context: str = Field(max_length=5_000)  # current paragraph or chapter theme
 
 
 class ChatRequest(BaseModel):
     chapter_id: str
-    message: str
-    history: Optional[List[dict]] = []
+    message: str = Field(min_length=1, max_length=5_000)
+    history: Optional[List[dict]] = Field(default=None, max_length=10)
+
+
+async def _consume_ai_request(user_id: str, db: AsyncSession) -> None:
+    await consume_user_quota(db, user_id, "ai_request", settings.AI_DAILY_REQUEST_LIMIT)
 
 
 # ─────────────────────────────────────────────
@@ -78,6 +83,7 @@ async def generate_chapter(
     chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
     project = await get_owned_project(chapter.project_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
+    await _consume_ai_request(current_user.id, db)
 
     log = GenerationLog(user_id=current_user.id, chapter_id=chapter.id, action="generate_chapter", model=settings.LLM_PROVIDER)
     db.add(log)
@@ -127,6 +133,7 @@ async def continue_writing(
 ):
     await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
+    await _consume_ai_request(current_user.id, db)
     voice_brief = await build_voice_brief(profile)
 
     prompt = f"""{voice_brief}
@@ -164,6 +171,7 @@ async def weave_story(
         raise HTTPException(status_code=404, detail="Testimony not found")
 
     voice_brief = await build_voice_brief(profile)
+    await _consume_ai_request(current_user.id, db)
 
     prompt = f"""{voice_brief}
 
@@ -198,6 +206,7 @@ async def voice_check(
 ):
     chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
+    await _consume_ai_request(current_user.id, db)
     analysis = await analyze_voice_drift(body.text, profile, db)
     score = analysis["overall_score"]
 
@@ -260,6 +269,7 @@ async def scripture_suggest(
 ):
     await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
+    await _consume_ai_request(current_user.id, db)
     anchor = [s["ref"] for s in (profile.anchor_scriptures or [])][:10]
     translation = profile.preferred_translation or "NKJV"
 
@@ -309,6 +319,7 @@ async def scribe_chat(
 ):
     await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
+    await _consume_ai_request(current_user.id, db)
     voice_brief = await build_voice_brief(profile)
 
     system = f"""{voice_brief}

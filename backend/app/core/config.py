@@ -92,7 +92,23 @@ class Settings(BaseSettings):
     # ── Auth ──────────────────────────────────────────────────────
     SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
+    # Browser sessions are server-managed cookies. A short bearer token is
+    # retained only for backwards-compatible API clients, never for the web UI.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    SESSION_EXPIRE_MINUTES: int = 10080  # 7 days
+    SESSION_COOKIE_NAME: str = "scribe_session"
+    SESSION_COOKIE_SECURE: bool = False
+
+    # Abuse protection. These limits are deliberately conservative for a
+    # public launch and can be raised from deployment environment variables.
+    AUTH_RATE_LIMIT_ATTEMPTS: int = 5
+    AUTH_RATE_LIMIT_WINDOW_MINUTES: int = 15
+    SIGNUP_RATE_LIMIT_ATTEMPTS: int = 5
+    SIGNUP_RATE_LIMIT_WINDOW_MINUTES: int = 60
+    AI_DAILY_REQUEST_LIMIT: int = 50
+    SERMON_DAILY_UPLOAD_LIMIT: int = 10
+    MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
+    MAX_PASTED_TEXT_CHARS: int = 200_000
 
     # ── Background jobs / embeddings ────────────────────────────
     # Unused — kept only so old .env files with this key don't error on load.
@@ -103,11 +119,11 @@ class Settings(BaseSettings):
 
     # ── App ───────────────────────────────────────────────────────
     ENVIRONMENT: str = "development"
-    CORS_ORIGINS: str = '["http://localhost:5173"]'
-    # Regex of additional allowed origins. Defaults to this project's Vercel
-    # deploys (production + branch/preview URLs like
-    # the-scribe-git-<branch>-<team>.vercel.app). Set to "" to disable.
-    CORS_ORIGIN_REGEX: str = r"https://the-scribe.*\.vercel\.app"
+    CORS_ORIGINS: str = '["http://localhost:5173", "https://the-scribe-ebon.vercel.app"]'
+    # Keep this empty in production unless a specific, trusted preview origin
+    # must be added. A broad Vercel wildcard turns every similarly-named Vercel
+    # deployment into an allowed browser origin.
+    CORS_ORIGIN_REGEX: str = ""
     PORT: int = 8000
 
     @field_validator("CORS_ORIGINS")
@@ -159,10 +175,15 @@ class Settings(BaseSettings):
                 f'LLM_PROVIDER must be "rotate", "anthropic", or "groq", got {self.LLM_PROVIDER!r}.'
             )
 
-        if self.ENVIRONMENT == "production" and self.SECRET_KEY == "change-me-in-production":
-            problems.append(
-                "SECRET_KEY is still the default placeholder — set a real secret in production."
-            )
+        if self.ENVIRONMENT == "production":
+            if self.SECRET_KEY == "change-me-in-production" or len(self.SECRET_KEY) < 32:
+                problems.append(
+                    "SECRET_KEY must be a unique random value of at least 32 characters in production."
+                )
+            if not self.SESSION_COOKIE_SECURE:
+                problems.append(
+                    "SESSION_COOKIE_SECURE must be true in production."
+                )
 
         if problems:
             for p in problems:

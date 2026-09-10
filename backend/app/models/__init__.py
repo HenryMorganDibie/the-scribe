@@ -46,6 +46,39 @@ class User(Base):
     generation_logs: Mapped[List["GenerationLog"]] = relationship(back_populates="user")
 
 
+class UserSession(Base):
+    """Opaque browser session. Only hashes of browser-held secrets are stored."""
+    __tablename__ = "user_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    csrf_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SecurityEvent(Base):
+    """Short-retention, privacy-preserving event ledger for limits and quotas."""
+    __tablename__ = "security_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    subject_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    ip_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_security_events_action_created", "action", "created_at"),
+        Index("ix_security_events_action_user_created", "action", "user_id", "created_at"),
+        Index("ix_security_events_action_subject_created", "action", "subject_hash", "created_at"),
+        Index("ix_security_events_action_ip_created", "action", "ip_hash", "created_at"),
+    )
+
+
 # ─────────────────────────────────────────────
 # VOICE PROFILE
 # ─────────────────────────────────────────────
