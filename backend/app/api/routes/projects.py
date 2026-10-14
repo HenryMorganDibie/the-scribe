@@ -332,7 +332,6 @@ async def companion_chat_history(
     db: AsyncSession = Depends(get_db),
 ):
     await get_owned_project(project_id, current_user.id, db)
-    await consume_user_quota(db, current_user.id, "ai_request", settings.AI_DAILY_REQUEST_LIMIT)
 
     messages = await get_history(project_id, db)
     return [
@@ -353,6 +352,7 @@ async def companion_chat(
     db: AsyncSession = Depends(get_db),
 ):
     await get_owned_project(project_id, current_user.id, db)
+    await consume_user_quota(db, current_user.id, "ai_request", settings.AI_DAILY_REQUEST_LIMIT)
 
     history_msgs = await get_history(project_id, db)
     history = [{"role": m.role, "content": m.content} for m in history_msgs]

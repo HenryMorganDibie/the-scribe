@@ -178,10 +178,11 @@ async def save_message(
 
 
 async def get_history(project_id: str, db: AsyncSession, limit: int = 50) -> list[CompanionChatMessage]:
+    """Return the most recent `limit` messages, oldest first."""
     result = await db.execute(
         select(CompanionChatMessage)
         .where(CompanionChatMessage.project_id == project_id)
-        .order_by(CompanionChatMessage.created_at)
+        .order_by(CompanionChatMessage.created_at.desc())
         .limit(limit)
     )
-    return list(result.scalars().all())
+    return list(reversed(result.scalars().all()))

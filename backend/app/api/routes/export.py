@@ -1,4 +1,7 @@
+import re
+import unicodedata
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
@@ -18,6 +21,19 @@ _MEDIA_TYPES = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "pdf": "application/pdf",
 }
+
+
+def _content_disposition(filename: str) -> str:
+    """Build an attachment header that survives any title.
+
+    Starlette encodes headers as Latin-1, so smart quotes, em dashes and
+    non-Latin titles raise on a raw filename. Send an ASCII fallback plus the
+    RFC 5987 UTF-8 form, which browsers prefer when present.
+    """
+    filename = re.sub(r'[\x00-\x1f\x7f"\\/]', "", filename)
+    ascii_name = unicodedata.normalize("NFKD", filename).encode("ascii", "ignore").decode()
+    ascii_name = re.sub(r"[^A-Za-z0-9._-]+", "-", ascii_name).strip("-.") or "manuscript"
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
 def _render_manuscript(fmt: str, title: str, author_name: str, chapters: list[dict]) -> bytes:
@@ -54,7 +70,7 @@ async def export_project(
     return Response(
         content=manuscript_bytes,
         media_type=_MEDIA_TYPES[format],
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _content_disposition(filename)},
     )
 
 
@@ -79,5 +95,5 @@ async def export_chapter(
     return Response(
         content=manuscript_bytes,
         media_type=_MEDIA_TYPES[format],
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _content_disposition(filename)},
     )

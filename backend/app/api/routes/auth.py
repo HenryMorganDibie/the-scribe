@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -32,6 +32,13 @@ class SignupRequest(BaseModel):
     password: str = Field(min_length=15, max_length=64)
     full_name: str = Field(min_length=1, max_length=120)
 
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        # Login and Google sign-in look users up by lowercased email, so the
+        # stored value must be lowercased too or mixed-case signups lock out.
+        return value.strip().lower()
+
     @field_validator("password")
     @classmethod
     def password_fits_bcrypt(cls, value: str) -> str:
@@ -51,6 +58,15 @@ class TokenResponse(BaseModel):
 
 class GoogleSignInRequest(BaseModel):
     credential: str = Field(min_length=1, max_length=12_000)
+
+
+async def _find_user_by_email(db: AsyncSession, email: str) -> User | None:
+    # Case-insensitive so accounts created before signup lowercased emails
+    # can still sign in.
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == email.strip().lower()).order_by(User.created_at)
+    )
+    return result.scalars().first()
 
 
 async def _login_response(user: User, db: AsyncSession, response: Response | None) -> TokenResponse:
@@ -103,8 +119,7 @@ async def signup(
             limit=settings.SIGNUP_RATE_LIMIT_ATTEMPTS,
             window_minutes=settings.SIGNUP_RATE_LIMIT_WINDOW_MINUTES,
         )
-    result = await db.execute(select(User).where(User.email == body.email))
-    if result.scalar_one_or_none():
+    if await _find_user_by_email(db, body.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(email=body.email, hashed_password=hash_password(body.password), full_name=body.full_name)
@@ -127,8 +142,7 @@ async def login(
         await enforce_auth_limit(db, request, "login", subject=form.username)
     if len(form.password.encode("utf-8")) > 72:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    result = await db.execute(select(User).where(User.email == form.username.strip().lower()))
-    user = result.scalar_one_or_none()
+    user = await _find_user_by_email(db, form.username)
     if not user or not verify_password(form.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return await _login_response(user, db, response)
@@ -147,8 +161,7 @@ async def google_sign_in(
     claims = await verify_google_credential(body.credential)
     email = claims["email"].strip().lower()
 
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
+    user = await _find_user_by_email(db, email)
     if user is None:
         user = User(
             email=email,

@@ -341,7 +341,10 @@ export default function ChapterEditor() {
           })
         },
         () => setChatStreaming(false),
-        () => setChatStreaming(false)
+        (err) => {
+          setChatStreaming(false)
+          toast.error(err)
+        }
       )
     } catch {
       setChatStreaming(false)
