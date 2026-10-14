@@ -136,7 +136,7 @@ class VoiceVersion(Base):
     # What triggered this version
     trigger: Mapped[str] = mapped_column(String)  # 'onboarding_complete'|'edit_accepted'|'manual_update'
     change_summary: Mapped[Optional[str]] = mapped_column(Text)  # AI-generated summary of what changed
-    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id"), nullable=True)
+    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True)
 
     # Voice quality metrics at this snapshot
     cadence_score: Mapped[Optional[float]] = mapped_column(Float)
@@ -248,7 +248,15 @@ class Project(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="projects")
-    chapters: Mapped[List["Chapter"]] = relationship(back_populates="project", order_by="Chapter.position")
+    # The database cascades chapter deletes (chapters.project_id ON DELETE
+    # CASCADE). passive_deletes stops the ORM from first trying to NULL each
+    # chapter's NOT NULL project_id, which made every project delete fail.
+    chapters: Mapped[List["Chapter"]] = relationship(
+        back_populates="project",
+        order_by="Chapter.position",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 # ─────────────────────────────────────────────
@@ -324,7 +332,7 @@ class GenerationLog(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
-    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id"), nullable=True)
+    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True)
 
     action: Mapped[str] = mapped_column(String)  # generate_chapter|continue|weave_story|voice_check|preview|chat
     model: Mapped[str] = mapped_column(String, default="claude-sonnet-4-20250514")

@@ -2,12 +2,12 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
 from app.db.session import get_db
-from app.models import User, Project, Chapter, Sermon, VoiceProfile
+from app.models import User, Project, Chapter, DocumentEmbedding, Sermon, VoiceProfile
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.api.ownership import get_owned_chapter, get_owned_project
@@ -312,6 +312,14 @@ async def delete_chapter(project_id: str, chapter_id: str, current_user: User = 
         current_user.id,
         db,
         project_id=project_id,
+    )
+    # Chapter chunks reference the chapter only by source_id (no FK), so
+    # remove them explicitly or Companion Chat keeps citing a deleted chapter.
+    await db.execute(
+        delete(DocumentEmbedding).where(
+            DocumentEmbedding.doc_type == "chapter",
+            DocumentEmbedding.source_id == chapter_id,
+        )
     )
     await db.delete(chapter)
     await db.commit()
