@@ -183,6 +183,7 @@ from app.db.session import get_db
 from app.models import User, VoiceProfile
 from app.core.security import get_current_user
 from app.services.ai.generation import generate_voice_preview_stream
+from app.services.packs import PACKS
 
 import structlog
 
@@ -243,15 +244,18 @@ async def save_step(
     if not profile:
         raise HTTPException(status_code=404, detail="Voice profile not found")
 
-    # Save raw step data to onboarding_data JSONB
-    if not profile.onboarding_data:
-        profile.onboarding_data = {}
+    if body.field == "pack" and body.value not in PACKS:
+        raise HTTPException(status_code=400, detail="Unknown book type")
 
-    profile.onboarding_data[body.field] = body.value
+    # Save raw step data to onboarding_data JSONB. Assign a new dict: an
+    # in-place mutation of a plain JSONB column isn't tracked by SQLAlchemy,
+    # so every step after the first was silently never saved.
+    profile.onboarding_data = {**(profile.onboarding_data or {}), body.field: body.value}
     profile.onboarding_step = max(profile.onboarding_step, body.step + 1)
 
     # Also update the actual field if it maps directly
     field_map = {
+        "pack": "pack",
         "ministry_background": "ministry_background",
         "theological_lens": "theological_lens",
         "target_audience": "target_audience",
@@ -316,7 +320,15 @@ async def complete_onboarding(
 
     data = body.data
 
-    # Persist all collected fields
+    # Persist all collected fields. Packs reuse the original column names
+    # (see app/services/packs.py), e.g. the general pack's genre is stored
+    # in theological_lens and its style rules in theological_guardrails.
+    if "pack" in data:
+        if data["pack"] not in PACKS:
+            raise HTTPException(status_code=400, detail="Unknown book type")
+        profile.pack = data["pack"]
+    if "style_rules" in data and isinstance(data["style_rules"], list):
+        profile.theological_guardrails = [str(rule) for rule in data["style_rules"] if str(rule).strip()]
     if "ministry_background" in data:
         profile.ministry_background = data["ministry_background"]
     if "theological_lens" in data:

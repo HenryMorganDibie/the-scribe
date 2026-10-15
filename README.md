@@ -1,11 +1,17 @@
 # The Scribe
 
-An AI writing assistant for Christian authors — apostolic, prophetic, and Spirit-filled
-voices in particular. The Scribe does not write generic devotional copy. It interviews
-an author about their theological lens, recurring phrases, anchor scriptures, cadence,
-and personal testimonies, builds a versioned "voice profile" from that interview, and
-then ghostwrites manuscript chapters in that voice — retrieving the author's own
-material via embeddings rather than stuffing everything into one prompt.
+An AI workspace that helps writers *finish* a book. Each manuscript keeps its own
+chapters, sources, stories and progress, and The Scribe works from all of it: it
+interviews the author (or learns from talks and drafts they already have), builds a
+versioned "voice profile", and drafts chapters in that voice — retrieving the
+author's own material via embeddings rather than stuffing everything into one prompt,
+and remembering what earlier chapters already said.
+
+Genre-specific behaviour comes from **packs** (`backend/app/services/packs.py`,
+`frontend/src/lib/packs.ts`). The `general` pack covers fiction, memoir, business,
+academic and other non-fiction; the `christian` pack — the product's original focus —
+adds sermons, testimonies and scripture verification against a real verse index.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for where this is heading.
 
 ---
 

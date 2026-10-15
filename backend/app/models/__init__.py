@@ -88,6 +88,10 @@ class VoiceProfile(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), unique=True)
 
+    # Genre pack (see app/services/packs.py). The interview columns below
+    # keep their original names; each pack labels them for its genre.
+    pack: Mapped[str] = mapped_column(String, nullable=False, default="general", server_default="general")
+
     # Raw interview answers
     ministry_background: Mapped[Optional[str]] = mapped_column(Text)
     theological_lens: Mapped[Optional[str]] = mapped_column(String)  # apostolic|prophetic|spirit-filled|charismatic

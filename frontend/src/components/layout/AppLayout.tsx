@@ -2,19 +2,19 @@ import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import QuillLogo from '@/components/ui/QuillLogo'
-import { useAuthStore } from '@/stores/authStore'
-
-const navItems = [
-  { to: '/dashboard', label: 'Desk' },
-  { to: '/projects', label: 'Manuscripts' },
-  { to: '/voice-profile', label: 'Voice' },
-  { to: '/testimonies', label: 'Testimonies' },
-  { to: '/sermons', label: 'Sermons' },
-  { to: '/ministry-dna', label: 'Ministry DNA' },
-]
+import { useAuthStore, usePack } from '@/stores/authStore'
 
 export default function AppLayout() {
   const { user, logout } = useAuthStore()
+  const pack = usePack()
+  const navItems = [
+    { to: '/dashboard', label: 'Desk' },
+    { to: '/projects', label: 'Manuscripts' },
+    { to: '/voice-profile', label: 'Voice' },
+    { to: '/testimonies', label: pack.nav.stories },
+    { to: '/sermons', label: pack.nav.sources },
+    { to: '/ministry-dna', label: pack.nav.dna },
+  ]
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
 

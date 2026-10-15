@@ -23,6 +23,7 @@ from app.services.ai.llm_client import get_llm_client
 from app.services.scripture_lookup import fetch_scripture_text
 from app.core.config import settings
 from app.services.security.rate_limits import consume_user_quota
+from app.services.packs import pack_for
 
 router = APIRouter(prefix="/generate", tags=["generation"])
 
@@ -175,15 +176,15 @@ async def weave_story(
 
     prompt = f"""{voice_brief}
 
-The author wants to weave this personal testimony into their writing:
+The author wants to weave this personal story into their writing:
 
-TESTIMONY:
+STORY ({pack_for(profile).story_label}):
 {testimony.story}
 
 CURRENT TEXT (insert after or integrate into):
 ...{body.cursor_text[-600:]}
 
-Naturally integrate or transition to the testimony. It should feel like revelation, not an insert.
+Naturally integrate or transition to the story. It should feel like part of the argument, not an insert.
 Write in the author's exact voice. 200–400 words."""
 
     async def stream():
@@ -269,6 +270,8 @@ async def scripture_suggest(
 ):
     await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
+    if not pack_for(profile).uses_scripture:
+        raise HTTPException(status_code=400, detail="Scripture suggestions are only available for Christian writing.")
     await _consume_ai_request(current_user.id, db)
     anchor = [s["ref"] for s in (profile.anchor_scriptures or [])][:10]
     translation = profile.preferred_translation or "NKJV"
@@ -327,7 +330,7 @@ async def scribe_chat(
 You are The Scribe — an AI writing assistant built specifically for this author.
 You help them write their book in their own voice. You know them deeply.
 When they ask you to write, write in their voice. When they ask questions, be their creative partner.
-Be direct, warm, and ministerially aware."""
+{pack_for(profile).chat_persona}"""
 
     messages = body.history[-10:] if body.history else []
     messages.append({"role": "user", "content": body.message})

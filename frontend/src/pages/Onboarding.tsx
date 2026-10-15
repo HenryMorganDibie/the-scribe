@@ -1,99 +1,21 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronRight, ChevronLeft, Sparkles, Loader2 } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Sparkles, Loader2, BookOpen, PenLine } from 'lucide-react'
 import toast from 'react-hot-toast'
 import QuillLogo from '@/components/ui/QuillLogo'
 import { api, streamSSE } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
-
-interface StepConfig {
-  key: string
-  question: string
-  subtext: string
-  type: 'text' | 'textarea' | 'select' | 'multiselect' | 'tags' | 'samples'
-  options?: string[]
-  placeholder?: string
-  previewTrigger?: boolean // whether to refresh live preview after this step
-}
-
-const STEPS: StepConfig[] = [
-  {
-    key: 'ministry_background',
-    question: 'Tell us about your ministry background.',
-    subtext: 'Where do you preach, teach, or minister? What is your spiritual journey?',
-    type: 'textarea',
-    placeholder: 'I have pastored for 12 years, focused on prophetic ministry and discipleship...',
-  },
-  {
-    key: 'theological_lens',
-    question: 'Which best describes your theological lens?',
-    subtext: 'This shapes how The Scribe frames every generation.',
-    type: 'select',
-    options: ['Apostolic', 'Prophetic', 'Spirit-filled / Charismatic', 'Pentecostal', 'Word of Faith'],
-    previewTrigger: true,
-  },
-  {
-    key: 'target_audience',
-    question: 'Who are you writing for?',
-    subtext: 'Describe your ideal reader — their struggles, their hunger, their stage of faith.',
-    type: 'textarea',
-    placeholder: 'Believers who feel called but unsure of their purpose, often discouraged by...',
-  },
-  {
-    key: 'tone_preferences',
-    question: 'What tones define your writing?',
-    subtext: 'Select all that resonate. Order matters — most important first.',
-    type: 'multiselect',
-    options: ['Teaching', 'Exhortation', 'Narrative / Storytelling', 'Devotional', 'Prophetic Declaration', 'Apologetic'],
-    previewTrigger: true,
-  },
-  {
-    key: 'preferred_translation',
-    question: 'Which Bible translation do you primarily use?',
-    subtext: 'The Scribe will cite scriptures in this translation.',
-    type: 'select',
-    options: ['NKJV', 'KJV', 'NIV', 'ESV', 'NLT', 'AMP'],
-  },
-  {
-    key: 'signature_phrases',
-    question: 'What are some phrases you say or write often?',
-    subtext: 'Things you find yourself repeating — your verbal fingerprints. One per line.',
-    type: 'tags',
-    placeholder: 'e.g. "This is your set time"\ne.g. "Let that sink in"\ne.g. "Can I be honest with you?"',
-    previewTrigger: true,
-  },
-  {
-    key: 'anchor_scriptures',
-    question: 'Which scriptures do you return to again and again?',
-    subtext: 'Your anchor scriptures — the ones that shape your message. One reference per line.',
-    type: 'tags',
-    placeholder: 'e.g. Isaiah 61:1-3\ne.g. Jeremiah 29:11\ne.g. Joel 2:28-29',
-    previewTrigger: true,
-  },
-  {
-    key: 'writing_samples',
-    question: 'Paste a sample of your writing.',
-    subtext: 'A sermon transcript, a devotional, a social post — anything in your authentic voice. The more, the better.',
-    type: 'samples',
-    placeholder: 'Paste your writing sample here...',
-    previewTrigger: true,
-  },
-  {
-    key: 'personal_testimony',
-    question: 'Share one personal testimony or story.',
-    subtext: "This goes into your Testimony Vault — The Scribe will weave it into your manuscript when it fits.",
-    type: 'textarea',
-    placeholder: 'There was a season when I was in the wilderness, and God spoke to me through...',
-  },
-]
+import { PACKS, type PackId } from '@/lib/packs'
 
 export default function Onboarding() {
+  const [packId, setPackId] = useState<PackId | null>(null)
   const [chosenPath, setChosenPath] = useState(false)
   const [stepIndex, setStepIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, any>>({
     tone_preferences: [],
     signature_phrases: [],
     anchor_scriptures: [],
+    style_rules: [],
     writing_samples: [],
   })
   const [tagInput, setTagInput] = useState('')
@@ -103,19 +25,31 @@ export default function Onboarding() {
   const navigate = useNavigate()
   const { fetchMe } = useAuthStore()
 
+  const pack = PACKS[packId ?? 'general']
+  const STEPS = pack.steps
   const step = STEPS[stepIndex]
   const progress = ((stepIndex + 1) / STEPS.length) * 100
   const previewAbortRef = useRef<boolean>(false)
 
   const currentValue = answers[step.key]
 
-  const startWithSermons = async () => {
+  const choosePack = async (id: PackId) => {
+    setPackId(id)
+    try {
+      await api.put('/onboarding/step', { step: 0, field: 'pack', value: id })
+    } catch {
+      // non-blocking — the pack is sent again when onboarding completes
+    }
+  }
+
+  const startWithSources = async () => {
     setSubmitting(true)
     try {
       await api.post('/onboarding/complete', {
         data: {
-          theological_lens: 'To be learned from my sermons',
-          preferred_translation: 'NKJV',
+          pack: pack.id,
+          theological_lens: pack.usesScripture ? 'To be learned from my sermons' : undefined,
+          preferred_translation: pack.usesScripture ? 'NKJV' : undefined,
           tone_preferences: [],
           writing_samples: [],
           signature_phrases: [],
@@ -123,15 +57,16 @@ export default function Onboarding() {
         },
       })
       await fetchMe()
-      toast.success('Upload your sermons and The Scribe will begin learning your voice.')
+      toast.success(`Upload your ${pack.source.plural} and The Scribe will begin learning your voice.`)
       navigate('/sermons')
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Unable to start sermon-first setup')
+      toast.error(err.response?.data?.detail || `Unable to start ${pack.source.singular}-first setup`)
       setSubmitting(false)
     }
   }
 
   const isStepValid = () => {
+    if (step.key === 'style_rules') return true // optional
     if (step.type === 'multiselect' || step.type === 'tags' || step.type === 'samples') {
       return Array.isArray(currentValue) && currentValue.length > 0
     }
@@ -179,7 +114,7 @@ export default function Onboarding() {
       // Final step — complete onboarding
       setSubmitting(true)
       try {
-        await api.post('/onboarding/complete', { data: answers })
+        await api.post('/onboarding/complete', { data: { ...answers, pack: pack.id } })
         await fetchMe()
         toast.success('Your Voice DNA is being woven together...')
         navigate('/dashboard')
@@ -212,32 +147,56 @@ export default function Onboarding() {
     updateAnswer(updated)
   }
 
-  // Trigger initial preview after first preview-eligible step
-  useEffect(() => {
-    if (stepIndex === 1 && answers.theological_lens) {
-      // Triggered via handleNext already
-    }
-  }, [stepIndex])
+  if (!packId) {
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-3xl">
+          <div className="mb-10"><QuillLogo size="lg" animate={false} /></div>
+          <p className="text-seal text-sm font-medium mb-2">Start your first manuscript</p>
+          <h1 className="font-display text-display-md font-semibold mb-3">What are you writing?</h1>
+          <p className="text-study-300 mb-8 max-w-2xl">This tailors the interview and the tools you'll see. You can change it later from your voice profile.</p>
+          <div className="grid md:grid-cols-2 gap-5">
+            {[PACKS.general, PACKS.christian].map((option) => (
+              <button key={option.id} onClick={() => choosePack(option.id)} className="card p-6 text-left hover:border-seal transition-colors">
+                {option.usesScripture ? <BookOpen size={24} className="text-seal mb-4" /> : <PenLine size={24} className="text-seal mb-4" />}
+                <h2 className="font-display text-xl font-semibold mb-2">{option.name}</h2>
+                <p className="text-sm text-study-300">{option.tagline}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (!chosenPath) {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-3xl">
           <div className="mb-10"><QuillLogo size="lg" animate={false} /></div>
-          <p className="text-seal text-sm font-medium mb-2">Start your first manuscript</p>
+          <button onClick={() => setPackId(null)} className="btn-ghost text-sm flex items-center gap-1 mb-6">
+            <ChevronLeft size={16} /> {pack.name}
+          </button>
           <h1 className="font-display text-display-md font-semibold mb-3">How would you like The Scribe to learn your voice?</h1>
           <p className="text-study-300 mb-8 max-w-2xl">Choose the fastest path now. You can always enrich your profile later.</p>
           <div className="grid md:grid-cols-2 gap-5">
-            <button onClick={startWithSermons} disabled={submitting} className="card p-6 text-left hover:border-seal transition-colors disabled:opacity-50">
+            <button onClick={startWithSources} disabled={submitting} className="card p-6 text-left hover:border-seal transition-colors disabled:opacity-50">
               <Sparkles size={24} className="text-seal mb-4" />
-              <h2 className="font-display text-xl font-semibold mb-2">I have sermons</h2>
-              <p className="text-sm text-study-300 mb-4">Upload completed sermons first. The Scribe will learn recurring language, scriptures, and stories, then help turn them into a book.</p>
-              <span className="text-sm text-seal font-medium flex items-center gap-2">{submitting ? <Loader2 size={15} className="animate-spin" /> : null} Start with sermons</span>
+              <h2 className="font-display text-xl font-semibold mb-2">I have {pack.source.plural}</h2>
+              <p className="text-sm text-study-300 mb-4">
+                Upload completed {pack.source.plural} first. The Scribe will learn your recurring language
+                {pack.usesScripture ? ', scriptures,' : ''} and stories, then help turn them into a book.
+              </p>
+              <span className="text-sm text-seal font-medium flex items-center gap-2">{submitting ? <Loader2 size={15} className="animate-spin" /> : null} Start with {pack.source.plural}</span>
             </button>
             <button onClick={() => setChosenPath(true)} className="card p-6 text-left hover:border-seal transition-colors">
               <ChevronRight size={24} className="text-seal mb-4" />
               <h2 className="font-display text-xl font-semibold mb-2">Interview me</h2>
-              <p className="text-sm text-study-300 mb-4">Share your ministry background, style, signature phrases, scriptures, and writing samples in a guided interview.</p>
+              <p className="text-sm text-study-300 mb-4">
+                {pack.usesScripture
+                  ? 'Share your ministry background, style, signature phrases, scriptures, and writing samples in a guided interview.'
+                  : 'Share your genre, audience, style, signature phrases, and writing samples in a guided interview.'}
+              </p>
               <span className="text-sm text-seal font-medium">Begin voice interview</span>
             </button>
           </div>

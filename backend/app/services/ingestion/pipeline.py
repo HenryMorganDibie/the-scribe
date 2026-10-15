@@ -10,6 +10,7 @@ from app.services.ingestion.transcription import transcribe_audio
 from app.services.voice.embeddings import EmbeddingService
 from app.services.ai.voice_enrichment import extract_dna_from_text, merge_voice_dna
 from app.services.ai.testimony_mining import mine_testimonies
+from app.services.packs import pack_for
 from app.services.voice.timeline import snapshot_voice
 
 logger = structlog.get_logger()
@@ -52,21 +53,24 @@ async def process_sermon(sermon_id: str, source_type: str, file_bytes: bytes | N
             profile = (await db.execute(
                 select(VoiceProfile).where(VoiceProfile.user_id == sermon.user_id)
             )).scalar_one_or_none()
+            pack = pack_for(profile)
             if profile:
-                dna = await extract_dna_from_text(transcript, db)
+                dna = await extract_dna_from_text(transcript, db, pack)
                 merged = merge_voice_dna(profile, dna)
                 sermon.phrases_added = merged["phrases_added"]
                 profile.dna_narrative = None  # invalidate cached report narrative
                 if dna.get("voice_summary"):
                     profile.voice_summary_embedding = await _embedding_service.embed(profile.voice_summary)
                 await db.commit()
+                summary = f"Ingested {pack.source_noun} '{sermon.title}': +{merged['phrases_added']} phrases"
+                if pack.uses_scripture:
+                    summary += f", +{merged['scriptures_added']} scriptures"
                 await snapshot_voice(
-                    profile=profile, trigger="sermon_ingested", db=db,
-                    change_summary=f"Ingested sermon '{sermon.title}': +{merged['phrases_added']} phrases, +{merged['scriptures_added']} scriptures.",
+                    profile=profile, trigger="sermon_ingested", db=db, change_summary=summary + ".",
                 )
 
-            # 4. Mine testimonies -> suggested
-            stories = await mine_testimonies(transcript)
+            # 4. Mine stories -> suggested
+            stories = await mine_testimonies(transcript, pack)
             for s in stories:
                 db.add(Testimony(
                     user_id=sermon.user_id, title=s["title"], story=s["story"], themes=s["themes"],

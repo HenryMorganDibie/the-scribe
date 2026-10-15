@@ -41,7 +41,7 @@ async def _build_chapter_manifest(project_id: str, db: AsyncSession) -> str:
         lines.append(
             f"Chapter {ch.chapter_number}: \"{ch.title}\" "
             f"[{ch.status}, {ch.word_count} words] — "
-            f"scriptures: {scriptures} — key points: {points}"
+            f"references: {scriptures} — key points: {points}"
         )
     return "\n".join(lines)
 
@@ -139,7 +139,7 @@ You answer questions like:
 - "Have I already covered this idea?" — check both the manifest and the passages.
 - "Which chapter discusses X?" — point to specific chapter numbers and titles.
 - "Am I repeating myself?" — compare passages/chapters for overlapping content.
-- "Where have I used this scripture before?" — check the manifest's scripture lists AND search the passages.
+- "Where have I used this reference before?" — check the manifest's reference lists AND search the passages.
 
 Be specific and cite chapter numbers/titles when you reference content. If something
 genuinely isn't in the manifest or retrieved passages, say so plainly rather than guessing —

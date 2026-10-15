@@ -9,6 +9,7 @@ from app.models import User, VoiceProfile, Testimony, GenerationLog, Chapter
 from app.core.security import get_current_user
 from app.services.voice.timeline import get_timeline, snapshot_voice, diff_versions
 from app.utils.jobs import fire_background_job
+from app.services.packs import PackId, pack_for
 
 router = APIRouter(tags=["voice"])
 
@@ -16,6 +17,7 @@ router = APIRouter(tags=["voice"])
 # ── Voice Profile ──────────────────────────────
 
 class VoiceProfileUpdate(BaseModel):
+    pack: Optional[PackId] = None
     theological_lens: Optional[str] = None
     tone_preferences: Optional[List[str]] = None
     preferred_translation: Optional[str] = None
@@ -34,6 +36,7 @@ async def get_voice_profile(current_user: User = Depends(get_current_user), db: 
     if not profile:
         raise HTTPException(status_code=404, detail="Voice profile not found")
     return {
+        "pack": pack_for(profile).id,
         "theological_lens": profile.theological_lens,
         "signature_phrases": profile.signature_phrases or [],
         "anchor_scriptures": profile.anchor_scriptures or [],
@@ -93,7 +96,7 @@ async def dna_report(current_user: User = Depends(get_current_user), db: AsyncSe
     metrics = compute_dna_metrics(profile, sermons, versions)
 
     if not profile.dna_narrative:
-        narrative = await generate_dna_narrative(metrics)
+        narrative = await generate_dna_narrative(metrics, pack_for(profile))
         profile.dna_narrative = narrative
         await db.commit()
     else:

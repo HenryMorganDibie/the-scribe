@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api, streamSSE } from '@/lib/api'
+import { usePack } from '@/stores/authStore'
 
 interface Chapter {
   id: string
@@ -48,6 +49,7 @@ interface VoiceCheck {
 type SidebarTab = 'actions' | 'chat'
 
 export default function ChapterEditor() {
+  const pack = usePack()
   const { id: projectId, chapterId } = useParams<{ id: string; chapterId: string }>()
   const [chapter, setChapter] = useState<Chapter | null>(null)
   const [loading, setLoading] = useState(true)
@@ -512,7 +514,7 @@ export default function ChapterEditor() {
                   <p><span className="font-medium text-seal-400">Cadence:</span> {voiceCheck.cadence_delta === undefined ? 'Run a fresh check to compare cadence.' : `${voiceCheck.cadence_delta >= 0 ? 'Slightly more flowing' : 'Slightly more punchy'} than your baseline`}</p>
                   {voiceCheck.phrase_matches && voiceCheck.phrase_matches.length > 0 && <p><span className="font-medium text-seal-400">Voice signals found:</span> {voiceCheck.phrase_matches.join(' · ')}</p>}
                   {voiceCheck.scripture_matches && voiceCheck.scripture_matches.length > 0 && <p><span className="font-medium text-seal-400">Anchor scriptures used:</span> {voiceCheck.scripture_matches.join(' · ')}</p>}
-                  {(!voiceCheck.phrase_matches || voiceCheck.phrase_matches.length === 0) && (!voiceCheck.scripture_matches || voiceCheck.scripture_matches.length === 0) && <p>Check the chapter after adding more of your own language or scripture anchors to see evidence here.</p>}
+                  {(!voiceCheck.phrase_matches || voiceCheck.phrase_matches.length === 0) && (!voiceCheck.scripture_matches || voiceCheck.scripture_matches.length === 0) && <p>Check the chapter after adding more of your own language{pack.usesScripture ? ' or scripture anchors' : ''} to see evidence here.</p>}
                 </div>
               </div>
             )}
@@ -523,12 +525,12 @@ export default function ChapterEditor() {
                 <ScrollText size={18} className="text-seal flex-shrink-0 mt-0.5" />
                 <div>
                   <h3 className="font-medium text-sm">Weave In My Story</h3>
-                  <p className="text-xs text-study-300">Pull from your testimony vault.</p>
+                  <p className="text-xs text-study-300">Pull from your {pack.story.vault}.</p>
                 </div>
               </div>
               {testimonies.length === 0 ? (
                 <p className="text-xs text-ink0 ml-8">
-                  No testimonies yet — <Link to="/testimonies" className="text-seal underline">add one</Link>
+                  No {pack.story.plural} yet — <Link to="/testimonies" className="text-seal underline">add one</Link>
                 </p>
               ) : (
                 <div className="ml-8 space-y-1.5">
@@ -547,7 +549,8 @@ export default function ChapterEditor() {
               {actionLoading === 'weave' && <Loader2 size={14} className="animate-spin text-seal ml-8 mt-2" />}
             </div>
 
-            {/* Scripture suggestions */}
+            {/* Scripture suggestions — only for packs with a verified scripture index */}
+            {pack.usesScripture && (<>
             <button
               onClick={handleScriptureSuggest}
               disabled={!!actionLoading}
@@ -577,6 +580,7 @@ export default function ChapterEditor() {
                 ))}
               </div>
             )}
+            </>)}
           </div>
         ) : (
           <>

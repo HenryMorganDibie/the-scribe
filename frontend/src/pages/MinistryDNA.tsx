@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Fingerprint } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { api } from '@/lib/api'
+import { usePack } from '@/stores/authStore'
 
 interface DnaReport {
   metrics: {
@@ -36,6 +37,7 @@ function RankedList({ title, items }: { title: string; items: { label: string; c
 }
 
 export default function MinistryDNA() {
+  const pack = usePack()
   const [report, setReport] = useState<DnaReport | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -52,17 +54,17 @@ export default function MinistryDNA() {
     <div className="px-4 py-6 md:p-8 max-w-5xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <Fingerprint size={24} className="text-seal" />
-        <h1 className="font-display text-display-md font-semibold">Ministry DNA</h1>
+        <h1 className="font-display text-display-md font-semibold">{pack.nav.dna}</h1>
       </div>
 
       <div className="card p-6 mb-6">
-        <p className="text-sm text-study-300 mb-1">Based on {sermon_count} ingested sermon(s)</p>
+        <p className="text-sm text-study-300 mb-1">Based on {sermon_count} ingested {pack.source.singular}(s)</p>
         <p className="font-display text-lg mb-3">{metrics.ministry_focus}</p>
         <p className="text-study-400 leading-relaxed">{narrative}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <RankedList title="Most-quoted scriptures" items={metrics.top_scriptures.map((s) => ({ label: s.ref, count: s.count }))} />
+      <div className={`grid grid-cols-1 gap-4 mb-6 ${pack.usesScripture ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+        {pack.usesScripture && <RankedList title="Most-quoted scriptures" items={metrics.top_scriptures.map((s) => ({ label: s.ref, count: s.count }))} />}
         <RankedList title="Most-used phrases" items={metrics.top_phrases.map((p) => ({ label: p.phrase, count: p.count }))} />
         <RankedList title="Recurring themes" items={metrics.top_themes.map((t) => ({ label: t.theme, count: t.count }))} />
       </div>
@@ -76,7 +78,7 @@ export default function MinistryDNA() {
               <YAxis stroke="#8a8175" fontSize={12} />
               <Tooltip />
               <Line type="monotone" dataKey="phrase_count" stroke="#9a3412" strokeWidth={2} dot />
-              <Line type="monotone" dataKey="scripture_count" stroke="#1E1E1E" strokeWidth={2} dot />
+              {pack.usesScripture && <Line type="monotone" dataKey="scripture_count" stroke="#1E1E1E" strokeWidth={2} dot />}
             </LineChart>
           </ResponsiveContainer>
         </div>

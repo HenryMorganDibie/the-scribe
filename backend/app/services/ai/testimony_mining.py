@@ -2,6 +2,7 @@
 import json
 from app.services.ai.llm_client import get_llm_client
 from app.services.ai.json_utils import strip_json_fences
+from app.services.packs import Pack, get_pack
 
 
 def _parse_testimonies(raw: str) -> list[dict]:
@@ -23,10 +24,11 @@ def _parse_testimonies(raw: str) -> list[dict]:
     return cleaned
 
 
-async def mine_testimonies(transcript: str) -> list[dict]:
+async def mine_testimonies(transcript: str, pack: Pack | None = None) -> list[dict]:
     """Extract candidate personal stories from a transcript. Returns [] on failure."""
-    prompt = f"""Read this sermon transcript and identify personal stories the author tells —
-healing testimonies, ministry experiences, leadership lessons, prophetic encounters, or personal struggles.
+    pack = pack or get_pack(None)
+    prompt = f"""Read this {pack.source_noun} transcript and identify personal stories the author tells —
+{pack.story_examples}.
 
 TRANSCRIPT:
 {transcript[:5000]}
@@ -34,7 +36,7 @@ TRANSCRIPT:
 Return a JSON array (max 5). Each item:
 {{"title": "short title", "story": "the story retold in 2-4 sentences", "themes": ["theme1", "theme2"]}}
 
-Only include genuine personal/ministry stories, not general teaching. If none, return [].
+Only include genuine personal stories or experiences, not general teaching or explanation. If none, return [].
 Return ONLY valid JSON. No markdown, no explanation."""
     result = await get_llm_client().complete(messages=[{"role": "user", "content": prompt}], max_tokens=1200)
     return _parse_testimonies(result.text)

@@ -14,6 +14,7 @@ from app.api.ownership import get_owned_chapter, get_owned_project
 from app.utils.jobs import fire_background_job
 from app.services.ai.companion_chat import companion_chat_stream, save_message, get_history
 from app.services.ai.sermon_book import build_sermon_book_plan
+from app.services.packs import pack_for
 from app.services.security.rate_limits import consume_user_quota
 
 router = APIRouter(tags=["projects"])
@@ -94,6 +95,7 @@ async def create_project_from_sermons(
             preferred_translation=profile.preferred_translation,
             guardrails=profile.theological_guardrails,
             sermons=sermons,
+            pack=pack_for(profile),
         )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -101,7 +103,7 @@ async def create_project_from_sermons(
     project = Project(
         user_id=current_user.id,
         title=body.title,
-        genre="teaching",
+        genre="teaching" if pack_for(profile).uses_scripture else profile.theological_lens,
         theme=plan["theme"] or f"A book for {body.target_reader}".strip(),
         target_chapters=len(plan["chapters"]),
         source_sermon_ids=requested_ids,

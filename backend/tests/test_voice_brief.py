@@ -17,6 +17,7 @@ def test_cadence_description_ranges():
 async def test_build_voice_brief_includes_core_sections():
     profile = VoiceProfile(
         user_id="test-user",
+        pack="christian",
         theological_lens="Prophetic",
         ministry_background="Pastors a discipleship-focused church.",
         target_audience="Believers seeking purpose",
@@ -43,7 +44,7 @@ async def test_build_voice_brief_includes_core_sections():
 @pytest.mark.asyncio
 async def test_build_voice_brief_handles_empty_profile():
     """A freshly-created profile (pre-onboarding) shouldn't crash the brief builder."""
-    profile = VoiceProfile(user_id="new-user")
+    profile = VoiceProfile(user_id="new-user", pack="christian")
     brief = await build_voice_brief(profile)
     assert "VOICE BRIEF" in brief
     assert "Spirit-filled" in brief  # default theological lens fallback

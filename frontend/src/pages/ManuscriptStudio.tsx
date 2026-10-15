@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { api } from '@/lib/api'
+import { usePack } from '@/stores/authStore'
 
 interface Chapter {
   id: string
@@ -71,6 +72,7 @@ function SortableChapter({ chapter, projectId, onDelete }: { chapter: Chapter; p
 }
 
 export default function ManuscriptStudio() {
+  const pack = usePack()
   const { id } = useParams<{ id: string }>()
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -215,7 +217,7 @@ export default function ManuscriptStudio() {
       {project.source_sermons.length > 0 && (
         <div className="card p-4 mb-6">
           <p className="text-xs uppercase tracking-wide text-study-300 mb-2">Book sources</p>
-          <p className="text-sm text-study-400 mb-2">This blueprint was grounded in these sermons. Generation still uses your voice profile and verified scripture references.</p>
+          <p className="text-sm text-study-400 mb-2">This blueprint was grounded in these {pack.source.plural}. Generation still uses your voice profile{pack.usesScripture ? ' and verified scripture references' : ''}.</p>
           <div className="flex flex-wrap gap-2">{project.source_sermons.map((sermon) => <span key={sermon.id} className="text-xs bg-seal-50 border border-seal-200 text-seal-400 rounded-full px-3 py-1">{sermon.title}</span>)}</div>
         </div>
       )}

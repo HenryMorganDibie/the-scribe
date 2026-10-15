@@ -22,6 +22,7 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.models import User, VoiceProfile
+from app.services.packs import get_pack
 from app.services.security.rate_limits import enforce_auth_limit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -69,6 +70,12 @@ async def _find_user_by_email(db: AsyncSession, email: str) -> User | None:
     return result.scalars().first()
 
 
+async def _user_pack(db: AsyncSession, user_id: str) -> str:
+    """The user's genre pack id — drives frontend labels."""
+    pack_id = (await db.execute(select(VoiceProfile.pack).where(VoiceProfile.user_id == user_id))).scalar_one_or_none()
+    return get_pack(pack_id).id
+
+
 async def _login_response(user: User, db: AsyncSession, response: Response | None) -> TokenResponse:
     # Keeping this branch also makes route functions easy to exercise directly
     # in unit tests; real HTTP requests always receive FastAPI's Response.
@@ -80,7 +87,10 @@ async def _login_response(user: User, db: AsyncSession, response: Response | Non
     return TokenResponse(
         access_token=create_access_token({"sub": user.id}),
         csrf_token=csrf_token,
-        user={"id": user.id, "email": user.email, "full_name": user.full_name, "onboarded": user.onboarded},
+        user={
+            "id": user.id, "email": user.email, "full_name": user.full_name, "onboarded": user.onboarded,
+            "pack": await _user_pack(db, user.id),
+        },
     )
 
 
@@ -212,5 +222,6 @@ async def me(
         "full_name": current_user.full_name,
         "onboarded": current_user.onboarded,
         "avatar_url": current_user.avatar_url,
+        "pack": await _user_pack(db, current_user.id),
         "csrf_token": csrf_token,
     }

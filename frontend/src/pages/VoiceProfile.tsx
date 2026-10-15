@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Feather, GitCommit, TrendingUp, TrendingDown, Minus, BookOpen, Activity, Pencil } from 'lucide-react'
 import { api } from '@/lib/api'
+import { PACKS, getPack, type PackId } from '@/lib/packs'
+import { useAuthStore, usePack } from '@/stores/authStore'
 import toast from 'react-hot-toast'
 
 interface VoiceProfileData {
+  pack?: PackId
   theological_lens?: string
   signature_phrases?: string[]
   anchor_scriptures?: { ref: string; themes?: string[] }[]
@@ -41,6 +44,10 @@ function cadenceLabel(score?: number) {
 }
 
 export default function VoiceProfile() {
+  const pack = usePack()
+  const fetchMe = useAuthStore((state) => state.fetchMe)
+  const [editPack, setEditPack] = useState<PackId>(pack.id)
+  const editingPack = getPack(editPack)
   const [profile, setProfile] = useState<VoiceProfileData | null>(null)
   const [timeline, setTimeline] = useState<VoiceVersion[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,6 +62,7 @@ export default function VoiceProfile() {
     setEditTranslation(profile?.preferred_translation || 'NKJV')
     setEditPhrases((profile?.signature_phrases || []).join('\n'))
     setEditGuardrails((profile?.theological_guardrails || []).join('\n'))
+    setEditPack(pack.id)
     setEditing(true)
   }
 
@@ -63,13 +71,16 @@ export default function VoiceProfile() {
       const phrases = editPhrases.split('\n').map((p) => p.trim()).filter(Boolean)
       const guardrails = editGuardrails.split('\n').map((rule) => rule.trim()).filter(Boolean)
       await api.put('/voice-profile', {
+        pack: editPack,
         voice_summary: editSummary,
         preferred_translation: editTranslation,
         signature_phrases: phrases,
         theological_guardrails: guardrails,
       })
-      setProfile((prev) => prev ? { ...prev, voice_summary: editSummary, preferred_translation: editTranslation, signature_phrases: phrases, theological_guardrails: guardrails } : prev)
+      setProfile((prev) => prev ? { ...prev, pack: editPack, voice_summary: editSummary, preferred_translation: editTranslation, signature_phrases: phrases, theological_guardrails: guardrails } : prev)
       setEditing(false)
+      // The pack drives nav labels and features app-wide.
+      if (editPack !== pack.id) await fetchMe()
       toast.success('Voice profile updated')
     } catch {
       toast.error('Failed to save')
@@ -112,6 +123,15 @@ export default function VoiceProfile() {
           <div className="bg-paper rounded-xl p-6 w-full max-w-lg space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
             <h2 className="font-display text-display-xs font-semibold">Edit Voice Profile</h2>
             <div>
+              <label className="block text-sm text-study-400 mb-1.5">Book type</label>
+              <select value={editPack} onChange={(e) => setEditPack(e.target.value as PackId)} className="input-field w-full">
+                {[PACKS.general, PACKS.christian].map((option) => (
+                  <option key={option.id} value={option.id}>{option.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-study-300 mt-1">Changes the labels, interview wording and tools The Scribe uses for you.</p>
+            </div>
+            <div>
               <label className="block text-sm text-study-400 mb-1.5">Ghost Brief (voice summary)</label>
               <textarea
                 value={editSummary}
@@ -119,14 +139,16 @@ export default function VoiceProfile() {
                 className="input-field w-full h-32 resize-none text-sm"
               />
             </div>
-            <div>
-              <label className="block text-sm text-study-400 mb-1.5">Preferred Bible Translation</label>
-              <select value={editTranslation} onChange={(e) => setEditTranslation(e.target.value)} className="input-field w-full">
-                {['NKJV', 'KJV', 'NIV', 'ESV', 'NLT', 'NASB', 'AMP'].map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
+            {editingPack.usesScripture && (
+              <div>
+                <label className="block text-sm text-study-400 mb-1.5">Preferred Bible Translation</label>
+                <select value={editTranslation} onChange={(e) => setEditTranslation(e.target.value)} className="input-field w-full">
+                  {['NKJV', 'KJV', 'NIV', 'ESV', 'NLT', 'NASB', 'AMP'].map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-sm text-study-400 mb-1.5">Signature Phrases (one per line)</label>
               <textarea
@@ -137,12 +159,14 @@ export default function VoiceProfile() {
               />
             </div>
             <div>
-              <label className="block text-sm text-study-400 mb-1.5">Theological Guardrails (one per line)</label>
+              <label className="block text-sm text-study-400 mb-1.5">{editingPack.rulesLabel} (one per line)</label>
               <textarea
                 value={editGuardrails}
                 onChange={(e) => setEditGuardrails(e.target.value)}
                 className="input-field w-full h-28 resize-none text-sm"
-                placeholder="Avoid presenting speculation as doctrine&#10;Keep salvation language consistent with my tradition"
+                placeholder={editingPack.usesScripture
+                  ? 'Avoid presenting speculation as doctrine\nKeep salvation language consistent with my tradition'
+                  : 'British spelling\nDefine every technical term on first use'}
               />
               <p className="text-xs text-study-300 mt-1">The Scribe applies these to every draft and flags conflicts instead of writing against them.</p>
             </div>
@@ -170,7 +194,7 @@ export default function VoiceProfile() {
           {/* Stats */}
           <div className="card p-6 space-y-4">
             <div>
-              <span className="text-xs text-study-300 uppercase tracking-wide">Theological Lens</span>
+              <span className="text-xs text-study-300 uppercase tracking-wide">{pack.lensLabel}</span>
               <p className="text-ink font-medium">{profile.theological_lens || '—'}</p>
             </div>
             <div>
@@ -185,10 +209,12 @@ export default function VoiceProfile() {
                 </div>
               )}
             </div>
-            <div>
-              <span className="text-xs text-study-300 uppercase tracking-wide">Translation</span>
-              <p className="text-ink font-medium">{profile.preferred_translation || 'NKJV'}</p>
-            </div>
+            {pack.usesScripture && (
+              <div>
+                <span className="text-xs text-study-300 uppercase tracking-wide">Translation</span>
+                <p className="text-ink font-medium">{profile.preferred_translation || 'NKJV'}</p>
+              </div>
+            )}
           </div>
 
           {/* Signature phrases */}
@@ -206,7 +232,7 @@ export default function VoiceProfile() {
           )}
 
           {/* Anchor scriptures */}
-          {profile.anchor_scriptures && profile.anchor_scriptures.length > 0 && (
+          {pack.usesScripture && profile.anchor_scriptures && profile.anchor_scriptures.length > 0 && (
             <div className="lg:col-span-3 card p-6">
               <h2 className="font-display text-display-xs font-semibold mb-3 flex items-center gap-2">
                 <BookOpen size={16} className="text-seal" /> Anchor Scriptures
@@ -240,7 +266,7 @@ export default function VoiceProfile() {
 
           {profile.theological_guardrails && profile.theological_guardrails.length > 0 && (
             <div className="lg:col-span-3 card p-6">
-              <h2 className="font-display text-display-xs font-semibold mb-2">Theological Guardrails</h2>
+              <h2 className="font-display text-display-xs font-semibold mb-2">{pack.rulesLabel}</h2>
               <p className="text-sm text-study-300 mb-3">These author-defined boundaries are included in every generation.</p>
               <ul className="space-y-2 text-sm text-study-400">{profile.theological_guardrails.map((rule, index) => <li key={`${rule}-${index}`} className="flex gap-2"><span className="text-seal">•</span>{rule}</li>)}</ul>
             </div>
@@ -293,7 +319,7 @@ export default function VoiceProfile() {
                         )}
                       </span>
                       <span>•</span>
-                      <span>{v.scripture_count ?? 0} anchor scriptures</span>
+                      {pack.usesScripture && <span>{v.scripture_count ?? 0} anchor scriptures</span>}
                       <span>•</span>
                       <span className="flex items-center gap-1">
                         Cadence: {cadenceLabel(v.cadence_score)}
