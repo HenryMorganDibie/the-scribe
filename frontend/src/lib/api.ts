@@ -14,6 +14,10 @@ export function setCsrfToken(token: string | null) {
   csrfToken = token
 }
 
+export function getCsrfToken() {
+  return csrfToken
+}
+
 const PUBLIC_PATHS = ['/', '/login', '/signup']
 
 /**

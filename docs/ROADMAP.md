@@ -14,7 +14,7 @@ Mark items `[x]` as they land. Add the PR/commit next to finished items.
 
 ---
 
-## Phase 0 — Reposition (a few days) — done, pending commit
+## Phase 0 — Reposition (a few days) — done, commit `3563625`
 
 - [x] Rewrite the landing page around "finish your book" (`frontend/src/pages/Landing.tsx`)
 - [x] Update `README.md` / `ARCHITECTURE.md` intro to the broader positioning
@@ -31,18 +31,24 @@ Mark items `[x]` as they land. Add the PR/commit next to finished items.
 - [x] Pack switcher on the Voice Profile page; scripture tools hidden for non-Christian packs
 - [x] Fix: onboarding steps after the first were never saved (JSONB in-place mutation)
 
-## Phase 1 — The workspace
+## Phase 1 — The workspace — done, pending commit
 
-- [ ] **Per-book style:** project-level style/voice that inherits from the user's default voice profile
-- [ ] **Book bible:** typed entries per project (character, place, term, source, note, research clip)
-  - [ ] Model + migration + CRUD routes
-  - [ ] Embed entries for retrieval (same pattern as `index_chapter`)
-  - [ ] Inject relevant entries into chapter generation and Companion Chat
-  - [ ] UI: book-bible panel in Manuscript Studio and the chapter editor sidebar
-- [ ] **Notes & research** attached to a book or chapter (can share the book-bible model)
-- [ ] **Chapter draft history:** versions on save and before every AI generation; view/restore
-  - [ ] Stop "Generate chapter" from clearing the editor with no way back
-- [ ] Per-book source library (sources linked to a project, not only the user)
+- [x] **Per-book style:** project-level style/voice that inherits from the user's default voice profile
+- [x] **Book bible:** typed entries per project (character, place, term, source, note, research clip)
+  - [x] Model + migration + CRUD routes
+  - [x] Embed entries for retrieval (same pattern as `index_chapter`)
+  - [x] Inject relevant entries into chapter generation and Companion Chat
+  - [x] UI: book-bible panel in Manuscript Studio and the chapter editor sidebar
+- [x] **Notes & research** attached to a book or chapter (can share the book-bible model)
+- [x] **Chapter draft history:** versions on save and before every AI generation; view/restore
+  - [x] Stop "Generate chapter" from clearing the editor with no way back
+- [x] Per-book source library (sources linked to a project, not only the user)
+- [x] Fix: leaving the editor silently dropped the last edits (unmount save still used the removed bearer token)
+
+Later improvements noticed while building Phase 1:
+- [ ] Show all *relevant* book-bible entries in the editor sidebar, not only the ones attached to the chapter
+- [ ] Side-by-side diff between a version and the current draft
+- [ ] Re-index existing linked sources' embeddings if the embedding model ever changes
 
 ## Phase 2 — Help with finishing
 

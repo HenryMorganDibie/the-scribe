@@ -246,7 +246,15 @@ class Project(Base):
     theme: Mapped[Optional[str]] = mapped_column(Text)
     target_chapters: Mapped[int] = mapped_column(Integer, default=10)
     status: Mapped[str] = mapped_column(String, default="active")  # active|complete|archived
+    # Linked source library (sermons table rows). Generation retrieves from
+    # these sources' transcripts when drafting this book's chapters.
     source_sermon_ids: Mapped[Optional[List[str]]] = mapped_column(JSONB)
+
+    # Per-book style. Each field overrides the author's voice profile for
+    # this book only; empty means "inherit".
+    target_audience: Mapped[Optional[str]] = mapped_column(Text)
+    style_rules: Mapped[Optional[List[str]]] = mapped_column(JSONB)
+    style_notes: Mapped[Optional[str]] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -296,6 +304,57 @@ class Chapter(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="chapters")
+
+
+# ─────────────────────────────────────────────
+# CHAPTER DRAFT HISTORY
+# Point-in-time copies of a chapter's content: taken periodically while the
+# author writes, and always before AI generation or a restore replaces it.
+# ─────────────────────────────────────────────
+class ChapterVersion(Base):
+    __tablename__ = "chapter_versions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    chapter_id: Mapped[str] = mapped_column(String, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)  # autosave|manual|before_ai|before_restore
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_chapter_versions_chapter_created", "chapter_id", "created_at"),
+    )
+
+
+# ─────────────────────────────────────────────
+# BOOK BIBLE
+# Per-book knowledge: characters, places, terms, sources, notes and research.
+# Embedded into document_embeddings (doc_type='book_entry') so generation
+# and Companion Chat retrieve the entries relevant to what's being written.
+# ─────────────────────────────────────────────
+class BookEntry(Base):
+    __tablename__ = "book_entries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Optional: notes/research attached to one chapter rather than the whole book.
+    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True)
+
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # character|place|term|source|note|research
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_book_entries_project_kind", "project_id", "kind"),
+        Index("ix_book_entries_chapter", "chapter_id"),
+    )
 
 
 # ─────────────────────────────────────────────

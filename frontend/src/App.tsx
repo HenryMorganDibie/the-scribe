@@ -13,6 +13,7 @@ import Projects from '@/pages/Projects'
 import ManuscriptStudio from '@/pages/ManuscriptStudio'
 import ChapterEditor from '@/pages/ChapterEditor'
 import CompanionChat from '@/pages/CompanionChat'
+import BookBible from '@/pages/BookBible'
 import VoiceDriftAnalytics from '@/pages/VoiceDriftAnalytics'
 import Testimonies from '@/pages/Testimonies'
 import Sermons from '@/pages/Sermons'
@@ -83,6 +84,7 @@ export default function App() {
           <Route path="/projects/:id" element={<ManuscriptStudio />} />
           <Route path="/projects/:id/chapters/:chapterId" element={<ChapterEditor />} />
           <Route path="/projects/:id/companion-chat" element={<CompanionChat />} />
+          <Route path="/projects/:id/bible" element={<BookBible />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

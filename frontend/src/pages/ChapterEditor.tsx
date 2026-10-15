@@ -9,8 +9,10 @@ import {
   Send, Loader2, Download, Save, X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { api, streamSSE } from '@/lib/api'
+import { api, getCsrfToken, streamSSE } from '@/lib/api'
 import { usePack } from '@/stores/authStore'
+import HistoryPanel from '@/components/editor/HistoryPanel'
+import ChapterNotesPanel from '@/components/editor/ChapterNotesPanel'
 
 interface Chapter {
   id: string
@@ -46,7 +48,14 @@ interface VoiceCheck {
   scripture_matches?: string[]
 }
 
-type SidebarTab = 'actions' | 'chat'
+type SidebarTab = 'actions' | 'chat' | 'notes' | 'history'
+
+const SIDEBAR_TABS: { id: SidebarTab; label: string }[] = [
+  { id: 'actions', label: 'Actions' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'notes', label: 'Notes' },
+  { id: 'history', label: 'History' },
+]
 
 export default function ChapterEditor() {
   const pack = usePack()
@@ -60,6 +69,7 @@ export default function ChapterEditor() {
   const [mobileAiOpen, setMobileAiOpen] = useState(false)
   const [scriptureSuggestions, setScriptureSuggestions] = useState<any[]>([])
   const [tab, setTab] = useState<SidebarTab>('actions')
+  const [historyKey, setHistoryKey] = useState(0)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatStreaming, setChatStreaming] = useState(false)
@@ -126,13 +136,16 @@ export default function ChapterEditor() {
         const content = editor.getHTML()
         if (content !== lastIndexedHtmlRef.current) {
           const wordCount = editor.storage.characterCount.words()
-          const token = localStorage.getItem('scribe_token')
           const url = api.defaults.baseURL + `/projects/${projectId}/chapters/${chapterId}`
+          const csrf = getCsrfToken()
+          // keepalive lets this finish after the page goes away. Auth is the
+          // session cookie + CSRF header, same as every other write.
           fetch(url, {
             method: 'PUT',
+            credentials: 'include',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: token ? `Bearer ${token}` : '',
+              ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
             },
             body: JSON.stringify({
               content,
@@ -173,6 +186,7 @@ export default function ChapterEditor() {
         trigger_indexing: true,
       })
       lastIndexedHtmlRef.current = content
+      setHistoryKey((k) => k + 1)
       toast.success('Saved')
     } catch {
       toast.error('Save failed')
@@ -184,6 +198,7 @@ export default function ChapterEditor() {
   // ── Generate full chapter ──────────────────
   const handleGenerateChapter = async () => {
     if (!editor) return
+    if (!editor.isEmpty && !window.confirm('Replace this draft with a new AI draft? Your current draft is kept in History.')) return
     setGenerating(true)
     editor.commands.clearContent()
 
@@ -206,6 +221,7 @@ export default function ChapterEditor() {
             trigger_indexing: true,
           }).catch(() => {})
           lastIndexedHtmlRef.current = content
+          setHistoryKey((k) => k + 1)
           toast.success('Chapter draft generated')
         },
         (err) => {
@@ -459,21 +475,30 @@ export default function ChapterEditor() {
 
         {/* Tabs */}
         <div className="flex border-b border-paper-300">
-          <button
-            onClick={() => setTab('actions')}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === 'actions' ? 'text-seal border-b-2 border-seal' : 'text-study-300 hover:text-study-400'}`}
-          >
-            Quick Actions
-          </button>
-          <button
-            onClick={() => setTab('chat')}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === 'chat' ? 'text-seal border-b-2 border-seal' : 'text-study-300 hover:text-study-400'}`}
-          >
-            Chat
-          </button>
+          {SIDEBAR_TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === id ? 'text-seal border-b-2 border-seal' : 'text-study-300 hover:text-study-400'}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        {tab === 'actions' ? (
+        {tab === 'history' ? (
+          <HistoryPanel
+            projectId={projectId!}
+            chapterId={chapterId!}
+            refreshKey={historyKey}
+            onRestored={(content) => {
+              editor?.commands.setContent(content)
+              lastIndexedHtmlRef.current = content
+            }}
+          />
+        ) : tab === 'notes' ? (
+          <ChapterNotesPanel projectId={projectId!} chapterId={chapterId!} />
+        ) : tab === 'actions' ? (
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {/* Continue writing */}
             <button
@@ -587,7 +612,7 @@ export default function ChapterEditor() {
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {chatMessages.length === 0 && (
                 <p className="text-sm text-ink0 italic">
-                  Ask The Scribe anything — "Make this more prophetic", "What's missing from this chapter?",
+                  Ask The Scribe anything — "Make this more vivid", "What's missing from this chapter?",
                   "Suggest a stronger opening hook"...
                 </p>
               )}

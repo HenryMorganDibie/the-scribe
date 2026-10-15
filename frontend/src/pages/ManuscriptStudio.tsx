@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { Plus, GripVertical, FileText, Download, ArrowLeft, X, MessageCircle, Trash2 } from 'lucide-react'
+import { Plus, GripVertical, FileText, Download, ArrowLeft, X, MessageCircle, Trash2, Library } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent,
@@ -10,7 +10,8 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { api } from '@/lib/api'
-import { usePack } from '@/stores/authStore'
+import BookStylePanel from '@/components/studio/BookStylePanel'
+import BookSourcesPanel from '@/components/studio/BookSourcesPanel'
 
 interface Chapter {
   id: string
@@ -30,6 +31,9 @@ interface ProjectDetail {
   target_chapters: number
   chapters: Chapter[]
   source_sermons: { id: string; title: string }[]
+  target_audience?: string | null
+  style_rules: string[]
+  style_notes?: string | null
 }
 
 const statusColors: Record<string, string> = {
@@ -72,7 +76,6 @@ function SortableChapter({ chapter, projectId, onDelete }: { chapter: Chapter; p
 }
 
 export default function ManuscriptStudio() {
-  const pack = usePack()
   const { id } = useParams<{ id: string }>()
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -184,6 +187,9 @@ export default function ManuscriptStudio() {
           <span className="text-sm text-seal capitalize">{project.genre}</span>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link to={`/projects/${project.id}/bible`} className="btn-secondary flex items-center gap-2 text-sm">
+            <Library size={16} /> Book Bible
+          </Link>
           <Link to={`/projects/${project.id}/companion-chat`} className="btn-secondary flex items-center gap-2 text-sm">
             <MessageCircle size={16} /> Companion Chat
           </Link>
@@ -214,13 +220,16 @@ export default function ManuscriptStudio() {
         </div>
       </div>
 
-      {project.source_sermons.length > 0 && (
-        <div className="card p-4 mb-6">
-          <p className="text-xs uppercase tracking-wide text-study-300 mb-2">Book sources</p>
-          <p className="text-sm text-study-400 mb-2">This blueprint was grounded in these {pack.source.plural}. Generation still uses your voice profile{pack.usesScripture ? ' and verified scripture references' : ''}.</p>
-          <div className="flex flex-wrap gap-2">{project.source_sermons.map((sermon) => <span key={sermon.id} className="text-xs bg-seal-50 border border-seal-200 text-seal-400 rounded-full px-3 py-1">{sermon.title}</span>)}</div>
-        </div>
-      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <BookStylePanel
+          projectId={project.id}
+          targetAudience={project.target_audience}
+          styleRules={project.style_rules}
+          styleNotes={project.style_notes}
+          onSaved={load}
+        />
+        <BookSourcesPanel projectId={project.id} linked={project.source_sermons} onSaved={load} />
+      </div>
 
       {showForm && (
         <form onSubmit={handleAddChapter} className="card p-6 mb-6 space-y-4 animate-fade-in-up">

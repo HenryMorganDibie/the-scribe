@@ -24,6 +24,8 @@ from app.services.scripture_lookup import fetch_scripture_text
 from app.core.config import settings
 from app.services.security.rate_limits import consume_user_quota
 from app.services.packs import pack_for
+from app.services.chapter_versions import snapshot_chapter
+from app.services.book_bible import book_context
 
 router = APIRouter(prefix="/generate", tags=["generation"])
 
@@ -86,6 +88,11 @@ async def generate_chapter(
     profile = await _get_profile(current_user.id, db)
     await _consume_ai_request(current_user.id, db)
 
+    # The editor replaces the draft with the generated chapter — keep the
+    # current draft in history first, unconditionally.
+    await snapshot_chapter(db, chapter, "before_ai")
+    await db.commit()
+
     log = GenerationLog(user_id=current_user.id, chapter_id=chapter.id, action="generate_chapter", model=settings.LLM_PROVIDER)
     db.add(log)
 
@@ -132,12 +139,16 @@ async def continue_writing(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_owned_chapter(body.chapter_id, current_user.id, db)
+    chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
+    project = await get_owned_project(chapter.project_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
     await _consume_ai_request(current_user.id, db)
-    voice_brief = await build_voice_brief(profile)
+    voice_brief = await build_voice_brief(profile, project=project)
+    knowledge = await book_context(db, project, body.cursor_text[-1000:], chapter_id=chapter.id)
 
     prompt = f"""{voice_brief}
+
+{knowledge}
 
 Continue the following passage naturally in this author's voice.
 {f'Instruction: {body.instruction}' if body.instruction else ''}
@@ -163,7 +174,8 @@ async def weave_story(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_owned_chapter(body.chapter_id, current_user.id, db)
+    chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
+    project = await get_owned_project(chapter.project_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
 
     result = await db.execute(select(Testimony).where(Testimony.id == body.testimony_id, Testimony.user_id == current_user.id))
@@ -171,7 +183,7 @@ async def weave_story(
     if not testimony:
         raise HTTPException(status_code=404, detail="Testimony not found")
 
-    voice_brief = await build_voice_brief(profile)
+    voice_brief = await build_voice_brief(profile, project=project)
     await _consume_ai_request(current_user.id, db)
 
     prompt = f"""{voice_brief}
@@ -320,12 +332,16 @@ async def scribe_chat(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_owned_chapter(body.chapter_id, current_user.id, db)
+    chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
+    project = await get_owned_project(chapter.project_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
     await _consume_ai_request(current_user.id, db)
-    voice_brief = await build_voice_brief(profile)
+    voice_brief = await build_voice_brief(profile, project=project)
+    knowledge = await book_context(db, project, body.message, chapter_id=chapter.id)
 
     system = f"""{voice_brief}
+
+{knowledge}
 
 You are The Scribe — an AI writing assistant built specifically for this author.
 You help them write their book in their own voice. You know them deeply.

@@ -17,6 +17,7 @@ from sqlalchemy import select, text
 from app.models import Project, Chapter, CompanionChatMessage, VoiceProfile
 from app.services.voice.embeddings import embedding_service
 from app.services.ai.llm_client import get_llm_client
+from app.services.book_bible import book_context
 
 
 async def _build_chapter_manifest(project_id: str, db: AsyncSession) -> str:
@@ -122,6 +123,8 @@ async def companion_chat_stream(
     if profile and profile.voice_summary:
         voice_note = f"\nThe author's voice (for your own tone when answering): {profile.voice_summary[:400]}"
 
+    knowledge = await book_context(db, project, user_message)
+
     system = f"""You are the Manuscript Companion for "{project.title}" — an AI that has read this \
 entire book-in-progress and helps the author understand their own manuscript.
 
@@ -133,9 +136,12 @@ CHAPTER MANIFEST (every chapter in this manuscript):
 
 RELEVANT PASSAGES (retrieved for this specific question):
 {excerpts_text}
+
+{knowledge}
 {voice_note}
 
 You answer questions like:
+- "Is this consistent with what I've established?" — check the passages against the established book facts.
 - "Have I already covered this idea?" — check both the manifest and the passages.
 - "Which chapter discusses X?" — point to specific chapter numbers and titles.
 - "Am I repeating myself?" — compare passages/chapters for overlapping content.

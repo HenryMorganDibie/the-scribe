@@ -11,11 +11,12 @@ from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
-from app.models import VoiceProfile, DocumentEmbedding, Testimony, Scripture, Chapter
+from app.models import VoiceProfile, DocumentEmbedding, Testimony, Scripture, Chapter, Project
 from app.services.voice.embeddings import EmbeddingService
 from app.services.ai.llm_client import get_llm_client, estimate_cost
 from app.services.ai.json_utils import strip_json_fences
 from app.services.packs import get_pack, pack_for
+from app.services.book_bible import book_context
 from app.services.ai.voice_enrichment import finalize_dna, voice_dna_prompt
 
 import structlog
@@ -35,17 +36,25 @@ def _cadence_description(score: float) -> str:
         return "flowing, expansive sentences — layered clauses, builds toward a declaration"
 
 
-async def build_voice_brief(profile: VoiceProfile, chapter_context: Optional[str] = None) -> str:
+async def build_voice_brief(
+    profile: VoiceProfile,
+    chapter_context: Optional[str] = None,
+    project: Optional[Project] = None,
+) -> str:
     """
     Build the personalized ghost brief injected into every generation.
     Genre-specific wording comes from the profile's pack (app/services/packs.py).
+    When `project` is given, its per-book style overrides the author's
+    defaults: its audience replaces theirs, its rules add to theirs.
     """
     pack = pack_for(profile)
     cadence = _cadence_description(profile.cadence_score or 0.5)
     phrases = profile.signature_phrases or []
     tags = profile.style_tags or []
     tones = profile.tone_preferences or []
-    rules = profile.theological_guardrails or []
+    book_rules = [r for r in ((project.style_rules if project else None) or []) if isinstance(r, str) and r.strip()]
+    rules = (profile.theological_guardrails or []) + book_rules
+    audience = (project.target_audience if project else None) or profile.target_audience or pack.default_audience
 
     samples_text = ""
     if profile.writing_samples:
@@ -69,7 +78,7 @@ VOICE BRIEF
 
 {pack.lens_label}: {profile.theological_lens or pack.default_lens}
 {pack.background_label}: {profile.ministry_background or 'Not specified'}
-TARGET AUDIENCE: {profile.target_audience or pack.default_audience}
+TARGET AUDIENCE: {audience}
 
 {pack.rules_label} (never contradict these):
 {chr(10).join(f'  • {rule}' for rule in rules) if rules else f'  • {pack.default_rule}'}
@@ -98,6 +107,9 @@ WRITING SAMPLES (study rhythm, paragraph length, vocabulary, opening hooks):
 {samples_text[:3000]}
 ═══════════════════════════════════════
 """
+
+    if project is not None and (project.style_notes or "").strip():
+        brief += f"\nSTYLE NOTES FOR THIS BOOK (take precedence over general habits above):\n{project.style_notes.strip()[:2000]}\n"
 
     if chapter_context:
         brief += f"\nCHAPTER CONTEXT FROM PRIOR CHAPTERS (maintain consistency of ideas, facts and claims):\n{chapter_context}\n"
@@ -213,8 +225,9 @@ async def generate_chapter_stream(
     # Get chapter memory (prior chapters)
     chapter_memory = await get_chapter_memory(project.id, chapter.chapter_number, db)
 
-    # Build voice brief
-    voice_brief = await build_voice_brief(profile, chapter_context=chapter_memory)
+    # Build voice brief (with this book's style) and the book's own knowledge
+    voice_brief = await build_voice_brief(profile, chapter_context=chapter_memory, project=project)
+    book_knowledge = await book_context(db, project, rag_query, chapter_id=chapter.id)
 
     # Build chapter brief
     pack = pack_for(profile)
@@ -234,6 +247,8 @@ MANUSCRIPT CONTEXT
 Book Title: {project.title}
 Book Theme: {project.theme or 'Not specified'}
 Genre: {project.genre or profile.theological_lens or pack.default_lens}
+
+{book_knowledge or '(No book facts or linked sources yet.)'}
 
 ════════════════════════════════════════
 THIS CHAPTER BRIEF
@@ -264,6 +279,7 @@ Write the full chapter draft. Target 1,500–2,500 words.
 {grounding}
 - {pack.closing_instruction}
 - Use their signature phrases naturally, not mechanically
+- Stay consistent with the established book facts: names, facts, terms and timeline must match them
 """
 
     llm = get_llm_client()

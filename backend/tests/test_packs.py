@@ -102,16 +102,23 @@ async def test_general_chapter_prompt_is_neutral(monkeypatch):
     async def fake_memory(*_args):
         return ""
 
+    async def fake_book_context(*_args, **_kwargs):
+        return ""
+
     monkeypatch.setattr(generation, "get_llm_client", lambda: llm)
     monkeypatch.setattr(generation, "retrieve_relevant_context", fake_context)
     monkeypatch.setattr(generation, "get_chapter_memory", fake_memory)
+    monkeypatch.setattr(generation, "book_context", fake_book_context)
 
     profile = _profile("general", theological_lens="Business")
     chapter = SimpleNamespace(
-        title="Pricing", intent="Teach value pricing", key_points=["Anchor on outcomes"],
+        id="c1", title="Pricing", intent="Teach value pricing", key_points=["Anchor on outcomes"],
         anchor_scriptures=["Ries, Positioning (1981)"], chapter_number=2,
     )
-    project = SimpleNamespace(id="p1", title="Charge More", theme=None, genre=None)
+    project = SimpleNamespace(
+        id="p1", title="Charge More", theme=None, genre=None,
+        target_audience=None, style_rules=None, style_notes=None,
+    )
 
     chunks = [c async for c in generation.generate_chapter_stream(profile, chapter, project, db=None)]
 
