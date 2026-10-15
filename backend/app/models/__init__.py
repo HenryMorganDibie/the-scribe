@@ -4,12 +4,12 @@ Upgraded schema includes: pgvector embeddings, voice evolution timeline,
 scripture index, voice drift scoring, expanded generation logs.
 """
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from sqlalchemy import (
-    String, Text, Boolean, Integer, Float, DateTime,
-    ForeignKey, JSON, ARRAY, Index
+    String, Text, Boolean, Integer, Float, Date, DateTime,
+    ForeignKey, JSON, ARRAY, Index, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -256,6 +256,11 @@ class Project(Base):
     style_rules: Mapped[Optional[List[str]]] = mapped_column(JSONB)
     style_notes: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Goals — all optional.
+    target_word_count: Mapped[Optional[int]] = mapped_column(Integer)
+    deadline: Mapped[Optional[date]] = mapped_column(Date)
+    daily_word_goal: Mapped[Optional[int]] = mapped_column(Integer)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -326,6 +331,26 @@ class ChapterVersion(Base):
 
     __table_args__ = (
         Index("ix_chapter_versions_chapter_created", "chapter_id", "created_at"),
+    )
+
+
+# ─────────────────────────────────────────────
+# WRITING LOG
+# One row per book per (UTC) day: how much the manuscript grew or shrank.
+# Feeds daily goals, pace, streaks and the writing-history chart.
+# ─────────────────────────────────────────────
+class WritingDay(Base):
+    __tablename__ = "writing_days"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    words_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    words_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "day", name="uq_writing_days_project_day"),
     )
 
 

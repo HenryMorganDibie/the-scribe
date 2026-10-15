@@ -1,10 +1,11 @@
 import json
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 from app.db.session import get_db
 from app.models import User, Project, Chapter, ChapterVersion, DocumentEmbedding, Sermon, VoiceProfile
@@ -16,6 +17,7 @@ from app.services.ai.companion_chat import companion_chat_stream, save_message, 
 from app.services.ai.sermon_book import build_sermon_book_plan
 from app.services.packs import pack_for
 from app.services.chapter_versions import AUTOSAVE_INTERVAL, snapshot_chapter
+from app.services.progress import record_words
 from app.services.security.rate_limits import consume_user_quota
 
 router = APIRouter(tags=["projects"])
@@ -42,6 +44,11 @@ class ProjectUpdate(BaseModel):
     style_notes: Optional[str] = Field(default=None, max_length=5_000)
     # Linked source library (ids of the author's processed sources).
     source_sermon_ids: Optional[List[str]] = Field(default=None, max_length=50)
+    # Goals. 0 clears a numeric goal; clear_deadline removes the deadline.
+    target_word_count: Optional[int] = Field(default=None, ge=0, le=2_000_000)
+    daily_word_goal: Optional[int] = Field(default=None, ge=0, le=100_000)
+    deadline: Optional[date] = None
+    clear_deadline: bool = False
 
 
 class SermonBookCreate(BaseModel):
@@ -162,6 +169,8 @@ async def get_project(project_id: str, current_user: User = Depends(get_current_
         "theme": project.theme, "status": project.status, "target_chapters": project.target_chapters,
         "target_audience": project.target_audience, "style_rules": project.style_rules or [],
         "style_notes": project.style_notes,
+        "target_word_count": project.target_word_count, "daily_word_goal": project.daily_word_goal,
+        "deadline": project.deadline,
         "source_sermons": source_sermons,
         "chapters": [{"id": c.id, "title": c.title, "chapter_number": c.chapter_number,
                       "status": c.status, "word_count": c.word_count, "position": c.position,
@@ -174,6 +183,11 @@ async def update_project(project_id: str, body: ProjectUpdate, current_user: Use
     project = await get_owned_project(project_id, current_user.id, db)
     updates = body.model_dump(exclude_none=True)
 
+    if updates.pop("clear_deadline", False):
+        updates["deadline"] = None
+    for goal in ("target_word_count", "daily_word_goal"):
+        if updates.get(goal) == 0:
+            updates[goal] = None
     if "style_rules" in updates:
         updates["style_rules"] = [r.strip()[:300] for r in updates["style_rules"] if r.strip()]
     for field in ("target_audience", "style_notes"):
@@ -220,8 +234,9 @@ class ChapterUpdate(BaseModel):
     anchor_scriptures: Optional[List[str]] = None
     testimony_ids: Optional[List[str]] = None
     content: Optional[str] = None
-    status: Optional[str] = None
-    word_count: Optional[int] = None
+    # Stage: draft (Outline) | in_progress (Drafted) | revised | complete (Done)
+    status: Optional[Literal["draft", "in_progress", "revised", "complete"]] = None
+    word_count: Optional[int] = Field(default=None, ge=0, le=1_000_000)
     trigger_indexing: Optional[bool] = False
 
 
@@ -321,6 +336,10 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
             await snapshot_chapter(db, chapter, "manual")
         else:
             await snapshot_chapter(db, chapter, "autosave", min_interval=AUTOSAVE_INTERVAL)
+
+    # Log how much the manuscript grew or shrank today (goals, pace, streaks).
+    if body.word_count is not None:
+        await record_words(db, project_id, current_user.id, body.word_count - (chapter.word_count or 0))
 
     update_data = body.model_dump(exclude_none=True)
     update_data.pop("trigger_indexing", None)

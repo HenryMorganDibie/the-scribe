@@ -31,7 +31,7 @@ Mark items `[x]` as they land. Add the PR/commit next to finished items.
 - [x] Pack switcher on the Voice Profile page; scripture tools hidden for non-Christian packs
 - [x] Fix: onboarding steps after the first were never saved (JSONB in-place mutation)
 
-## Phase 1 — The workspace — done, pending commit
+## Phase 1 — The workspace — done, commit `bc981eb`
 
 - [x] **Per-book style:** project-level style/voice that inherits from the user's default voice profile
 - [x] **Book bible:** typed entries per project (character, place, term, source, note, research clip)
@@ -50,13 +50,20 @@ Later improvements noticed while building Phase 1:
 - [ ] Side-by-side diff between a version and the current draft
 - [ ] Re-index existing linked sources' embeddings if the embedding model ever changes
 
-## Phase 2 — Help with finishing
+## Phase 2 — Help with finishing — done, pending commit
 
-- [ ] Goals: target word count, deadline, daily/weekly targets per book
-- [ ] Progress dashboard: outline → drafted → revised → done per chapter
-- [ ] "What's next" from Companion Chat (gaps in the outline, unfinished chapters)
-- [ ] Consistency checks: repeated content across chapters, contradicting book-bible facts
-- [ ] Writing streaks / session history
+- [x] Goals: target word count, deadline, daily target per book (weekly target not built — see below)
+- [x] Progress dashboard: outline → drafted → revised → done per chapter
+- [x] "What's next" from Companion Chat (gaps in the outline, unfinished chapters)
+- [x] Consistency checks: repeated content across chapters, contradicting book-bible facts
+- [x] Writing streaks / session history
+- [x] Chapter stages (Outline → Drafted → Revised → Done) settable from the studio and the editor — previously nothing in the UI could mark a chapter complete
+
+Later improvements noticed while building Phase 2:
+- [ ] Days follow UTC; use the writer's own timezone for "today" and streaks
+- [ ] Optionally exclude AI-generated words from the daily goal (count only words the author typed)
+- [ ] Cross-book writing stats and streak on the Dashboard
+- [ ] Weekly word target (alongside the daily one)
 
 ## Phase 3 — Second pack, then fiction
 

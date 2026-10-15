@@ -12,6 +12,9 @@ import { CSS } from '@dnd-kit/utilities'
 import { api } from '@/lib/api'
 import BookStylePanel from '@/components/studio/BookStylePanel'
 import BookSourcesPanel from '@/components/studio/BookSourcesPanel'
+import ProgressPanel from '@/components/studio/ProgressPanel'
+import RepetitionPanel from '@/components/studio/RepetitionPanel'
+import { STAGES, stageOf, type Stage } from '@/lib/stages'
 
 interface Chapter {
   id: string
@@ -36,13 +39,12 @@ interface ProjectDetail {
   style_notes?: string | null
 }
 
-const statusColors: Record<string, string> = {
-  draft: 'status-draft',
-  in_progress: 'status-in_progress',
-  complete: 'status-complete',
-}
-
-function SortableChapter({ chapter, projectId, onDelete }: { chapter: Chapter; projectId: string; onDelete: (id: string) => void }) {
+function SortableChapter({ chapter, projectId, onDelete, onStageChange }: {
+  chapter: Chapter
+  projectId: string
+  onDelete: (id: string) => void
+  onStageChange: (id: string, stage: Stage) => void
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: chapter.id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }
 
@@ -61,9 +63,14 @@ function SortableChapter({ chapter, projectId, onDelete }: { chapter: Chapter; p
           {chapter.voice_match_score && <span>Voice match: {Math.round(chapter.voice_match_score * 100)}%</span>}
         </div>
       </Link>
-      <span className={`status-tag ${statusColors[chapter.status] || statusColors.draft}`}>
-        {chapter.status.replace('_', ' ')}
-      </span>
+      <select
+        value={stageOf(chapter.status).id}
+        onChange={(e) => onStageChange(chapter.id, e.target.value as Stage)}
+        className={`status-tag cursor-pointer ${stageOf(chapter.status).className}`}
+        aria-label={`Stage of ${chapter.title}`}
+      >
+        {STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+      </select>
       <button
         onClick={(e) => { e.preventDefault(); onDelete(chapter.id) }}
         className="p-1.5 text-study-300 hover:text-red-600 hover:bg-red-50 rounded"
@@ -90,19 +97,33 @@ export default function ManuscriptStudio() {
     try {
       await api.delete(`/projects/${id}/chapters/${chapterId}`)
       setProject((prev) => prev ? { ...prev, chapters: prev.chapters.filter((c) => c.id !== chapterId) } : prev)
+      setProgressKey((k) => k + 1)
       toast.success('Chapter deleted')
     } catch {
       toast.error('Failed to delete chapter')
     }
   }
 
+  const handleStageChange = async (chapterId: string, status: Stage) => {
+    setProject((prev) => prev ? { ...prev, chapters: prev.chapters.map((c) => c.id === chapterId ? { ...c, status } : c) } : prev)
+    try {
+      await api.put(`/projects/${id}/chapters/${chapterId}`, { status })
+      setProgressKey((k) => k + 1)
+    } catch {
+      toast.error('Failed to update stage')
+      load()
+    }
+  }
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const [progressKey, setProgressKey] = useState(0)
 
   const load = () => {
     api.get(`/projects/${id}`)
       .then((r) => setProject(r.data))
       .catch(() => toast.error('Failed to load manuscript'))
       .finally(() => setLoading(false))
+    setProgressKey((k) => k + 1)
   }
 
   useEffect(load, [id])
@@ -170,11 +191,6 @@ export default function ManuscriptStudio() {
   if (loading) return <div className="p-8 text-study-300">Loading manuscript...</div>
   if (!project) return <div className="p-8 text-study-300">Manuscript not found.</div>
 
-  const completedChapters = project.chapters.filter((chapter) => chapter.status === 'complete').length
-  const totalWords = project.chapters.reduce((sum, chapter) => sum + (chapter.word_count || 0), 0)
-  const chapterProgress = Math.min(100, Math.round((completedChapters / Math.max(project.target_chapters, 1)) * 100))
-  const nextChapter = project.chapters.find((chapter) => chapter.status === 'draft') || project.chapters.find((chapter) => chapter.status !== 'complete')
-
   return (
     <div className="px-4 py-6 md:p-8 max-w-4xl mx-auto">
       <Link to="/projects" className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-4">
@@ -208,17 +224,7 @@ export default function ManuscriptStudio() {
 
       {project.theme && <p className="text-study-300 mb-6">{project.theme}</p>}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="card p-4 md:col-span-2">
-          <div className="flex items-center justify-between text-sm mb-2"><span className="font-medium">Manuscript progress</span><span className="text-seal">{completedChapters}/{project.target_chapters} chapters complete</span></div>
-          <div className="h-2 bg-paper-200 rounded-full overflow-hidden"><div className="h-full bg-seal transition-all" style={{ width: `${chapterProgress}%` }} /></div>
-          <p className="text-xs text-study-300 mt-2">{totalWords.toLocaleString()} words drafted · {nextChapter ? `Next: ${nextChapter.title}` : 'Your manuscript is ready to review and export.'}</p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs uppercase tracking-wide text-study-300 mb-2">Next best step</p>
-          {nextChapter ? <Link to={`/projects/${project.id}/chapters/${nextChapter.id}`} className="text-sm text-seal hover:underline">{nextChapter.status === 'draft' ? `Draft “${nextChapter.title}”` : `Finish “${nextChapter.title}”`}</Link> : <span className="text-sm text-seal">Export your manuscript</span>}
-        </div>
-      </div>
+      <ProgressPanel projectId={project.id} refreshKey={progressKey} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <BookStylePanel
@@ -255,11 +261,17 @@ export default function ManuscriptStudio() {
           <SortableContext items={project.chapters.map((c) => c.id)} strategy={verticalListSortingStrategy}>
             <div className="space-y-2">
               {project.chapters.map((ch) => (
-                <SortableChapter key={ch.id} chapter={ch} projectId={project.id} onDelete={handleDeleteChapter} />
+                <SortableChapter key={ch.id} chapter={ch} projectId={project.id} onDelete={handleDeleteChapter} onStageChange={handleStageChange} />
               ))}
             </div>
           </SortableContext>
         </DndContext>
+      )}
+
+      {project.chapters.length > 1 && (
+        <div className="mt-6">
+          <RepetitionPanel projectId={project.id} />
+        </div>
       )}
     </div>
   )

@@ -64,6 +64,7 @@
   }
   .status-draft       { @apply border-study-300 text-study-400; }
   .status-in_progress { @apply border-seal-300 text-seal-400 bg-seal-50; }
+  .status-revised     { @apply border-seal-400 text-seal-500 bg-seal-100; }
   .status-complete    { @apply border-study-500 text-study-700 bg-study-50; }
 }
 

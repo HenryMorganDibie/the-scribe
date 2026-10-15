@@ -13,6 +13,8 @@ import { api, getCsrfToken, streamSSE } from '@/lib/api'
 import { usePack } from '@/stores/authStore'
 import HistoryPanel from '@/components/editor/HistoryPanel'
 import ChapterNotesPanel from '@/components/editor/ChapterNotesPanel'
+import ConsistencyCheck from '@/components/editor/ConsistencyCheck'
+import { STAGES, stageOf, type Stage } from '@/lib/stages'
 
 interface Chapter {
   id: string
@@ -171,6 +173,19 @@ export default function ChapterEditor() {
       // silent
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleStageChange = async (status: Stage) => {
+    if (!chapter) return
+    const previous = chapter.status
+    setChapter({ ...chapter, status })
+    try {
+      await api.put(`/projects/${projectId}/chapters/${chapterId}`, { status })
+      toast.success(`Marked ${stageOf(status).label}`)
+    } catch {
+      setChapter((c) => (c ? { ...c, status: previous } : c))
+      toast.error('Failed to update stage')
     }
   }
 
@@ -399,7 +414,17 @@ export default function ChapterEditor() {
 
           <div className="flex items-start justify-between mb-6">
             <div>
-              <span className="text-xs text-ink0 font-mono">Chapter {chapter.chapter_number}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-ink0 font-mono">Chapter {chapter.chapter_number}</span>
+                <select
+                  value={stageOf(chapter.status).id}
+                  onChange={(e) => handleStageChange(e.target.value as Stage)}
+                  className={`status-tag cursor-pointer ${stageOf(chapter.status).className}`}
+                  aria-label="Chapter stage"
+                >
+                  {STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+              </div>
               <h1 className="font-display text-display-md font-semibold">{chapter.title}</h1>
               {chapter.intent && <p className="text-study-300 mt-1 text-sm">{chapter.intent}</p>}
             </div>
@@ -543,6 +568,16 @@ export default function ChapterEditor() {
                 </div>
               </div>
             )}
+
+            {/* Consistency against the book bible */}
+            <ConsistencyCheck
+              projectId={projectId!}
+              chapterId={chapterId!}
+              disabled={!!actionLoading}
+              beforeCheck={async () => {
+                if (editor) await autoSave(editor.getHTML(), editor.storage.characterCount.words())
+              }}
+            />
 
             {/* Weave story */}
             <div className="card p-3">
