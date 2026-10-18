@@ -13,7 +13,7 @@ from app.services.security.rate_limits import consume_user_quota
 
 router = APIRouter(prefix="/sermons", tags=["sermons"])
 
-_EXT_TO_TYPE = {"pdf": "pdf", "docx": "docx"}
+_EXT_TO_TYPE = {"pdf": "pdf", "docx": "docx", "txt": "txt", "md": "txt", "markdown": "txt"}
 
 
 async def _read_upload_limited(file: UploadFile, limit: int) -> bytes:

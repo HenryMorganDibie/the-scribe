@@ -14,7 +14,7 @@ from app.services.book_bible import index_entry, remove_entry_index
 
 router = APIRouter(tags=["book-bible"])
 
-EntryKind = Literal["character", "place", "term", "source", "note", "research"]
+EntryKind = Literal["character", "place", "term", "event", "source", "note", "research"]
 MAX_ENTRIES_PER_BOOK = 500
 
 
@@ -23,6 +23,8 @@ class EntryCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(default="", max_length=20_000)
     chapter_id: Optional[str] = None
+    when_label: Optional[str] = Field(default=None, max_length=120)
+    timeline_order: Optional[int] = Field(default=None, ge=-1_000_000, le=1_000_000)
 
 
 class EntryUpdate(BaseModel):
@@ -31,11 +33,16 @@ class EntryUpdate(BaseModel):
     body: Optional[str] = Field(default=None, max_length=20_000)
     chapter_id: Optional[str] = None
     detach_chapter: bool = False  # chapter_id=None means "unchanged"; this clears it
+    # Timeline: "" clears the label; clear_timeline_order removes the position.
+    when_label: Optional[str] = Field(default=None, max_length=120)
+    timeline_order: Optional[int] = Field(default=None, ge=-1_000_000, le=1_000_000)
+    clear_timeline_order: bool = False
 
 
 def _serialize(e: BookEntry) -> dict:
     return {
         "id": e.id, "kind": e.kind, "title": e.title, "body": e.body, "chapter_id": e.chapter_id,
+        "when_label": e.when_label, "timeline_order": e.timeline_order,
         "created_at": e.created_at, "updated_at": e.updated_at,
     }
 
@@ -65,7 +72,9 @@ async def list_entries(
         conditions.append(BookEntry.kind == kind)
     if chapter_id:
         conditions.append(BookEntry.chapter_id == chapter_id)
-    result = await db.execute(select(BookEntry).where(*conditions).order_by(BookEntry.kind, BookEntry.title))
+    result = await db.execute(select(BookEntry).where(*conditions).order_by(
+        BookEntry.kind, BookEntry.timeline_order.asc().nulls_last(), BookEntry.title,
+    ))
     return [_serialize(e) for e in result.scalars().all()]
 
 
@@ -88,6 +97,7 @@ async def create_entry(
     entry = BookEntry(
         project_id=project_id, user_id=current_user.id, chapter_id=body.chapter_id,
         kind=body.kind, title=body.title.strip(), body=body.body.strip(),
+        when_label=(body.when_label or "").strip() or None, timeline_order=body.timeline_order,
     )
     db.add(entry)
     await db.flush()
@@ -117,6 +127,12 @@ async def update_entry(
         entry.title = body.title.strip()
     if body.body is not None:
         entry.body = body.body.strip()
+    if body.when_label is not None:
+        entry.when_label = body.when_label.strip() or None
+    if body.timeline_order is not None:
+        entry.timeline_order = body.timeline_order
+    elif body.clear_timeline_order:
+        entry.timeline_order = None
 
     await index_entry(db, entry)
     await db.commit()

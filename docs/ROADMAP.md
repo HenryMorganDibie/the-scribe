@@ -50,7 +50,7 @@ Later improvements noticed while building Phase 1:
 - [ ] Side-by-side diff between a version and the current draft
 - [ ] Re-index existing linked sources' embeddings if the embedding model ever changes
 
-## Phase 2 — Help with finishing — done, pending commit
+## Phase 2 — Help with finishing — done, commit `860f0e8`
 
 - [x] Goals: target word count, deadline, daily target per book (weekly target not built — see below)
 - [x] Progress dashboard: outline → drafted → revised → done per chapter
@@ -65,17 +65,24 @@ Later improvements noticed while building Phase 2:
 - [ ] Cross-book writing stats and streak on the Dashboard
 - [ ] Weekly word target (alongside the daily one)
 
-## Phase 3 — Second pack, then fiction
+## Phase 3 — Second pack, then fiction — done (except academic), pending commit
 
-- [ ] **General non-fiction pack**
-  - [ ] Source ingestion copy and prompts for talks, podcasts, lectures, blog posts, interviews
-  - [ ] Story/anecdote bank (from testimony mining)
-  - [ ] Citation/quote verification (generalise the scripture verifier)
-- [ ] **Fiction pack**
-  - [ ] Character / place / timeline entry types with continuity checks
-  - [ ] Scene-level structure inside chapters
-  - [ ] Fiction-specific style signals (POV, tense, dialogue ratio)
+- [x] **General non-fiction pack**
+  - [x] Source ingestion copy and prompts for talks, podcasts, lectures, blog posts, interviews
+  - [x] Story/anecdote bank (from testimony mining)
+  - [x] Citation/quote verification (generalise the scripture verifier)
+- [x] **Fiction pack**
+  - [x] Character / place / timeline entry types with continuity checks
+  - [x] Scene-level structure inside chapters
+  - [x] Fiction-specific style signals (POV, tense, dialogue ratio)
 - [ ] (Later) Academic pack: citation manager, literature base, reference styles
+- [x] Plan tab in the editor: edit a chapter's intent and key points (previously impossible after creation) plus its scene/section plan
+- [x] Fix: voice check showed "NaN%" after running (response field name mismatch)
+
+Later improvements noticed while building Phase 3:
+- [ ] Verify quotes from published works outside the book's own sources (citation lookup)
+- [ ] Detect dialogue in single quotes (British style) for the fiction signals
+- [ ] Warn automatically when a chapter's POV/tense drifts from the book's POV rule
 
 ---
 

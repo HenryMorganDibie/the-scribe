@@ -14,6 +14,8 @@ import { usePack } from '@/stores/authStore'
 import HistoryPanel from '@/components/editor/HistoryPanel'
 import ChapterNotesPanel from '@/components/editor/ChapterNotesPanel'
 import ConsistencyCheck from '@/components/editor/ConsistencyCheck'
+import PlanPanel, { type Scene } from '@/components/editor/PlanPanel'
+import QuoteCheck from '@/components/editor/QuoteCheck'
 import { STAGES, stageOf, type Stage } from '@/lib/stages'
 
 interface Chapter {
@@ -27,6 +29,7 @@ interface Chapter {
   content?: string
   status: string
   voice_match_score?: number
+  scenes?: Scene[] | null
 }
 
 interface Testimony {
@@ -48,13 +51,15 @@ interface VoiceCheck {
   phrase_matches?: string[]
   phrase_usage_rate?: number
   scripture_matches?: string[]
+  fiction_signals?: { pov: string; tense: string; dialogue_ratio: number } | null
 }
 
-type SidebarTab = 'actions' | 'chat' | 'notes' | 'history'
+type SidebarTab = 'actions' | 'chat' | 'plan' | 'notes' | 'history'
 
 const SIDEBAR_TABS: { id: SidebarTab; label: string }[] = [
   { id: 'actions', label: 'Actions' },
   { id: 'chat', label: 'Chat' },
+  { id: 'plan', label: 'Plan' },
   { id: 'notes', label: 'Notes' },
   { id: 'history', label: 'History' },
 ]
@@ -318,7 +323,8 @@ export default function ChapterEditor() {
         chapter_id: chapterId,
         text: editor.getText(),
       })
-      setVoiceCheck(res.data)
+      // The API calls the headline number voice_match_score; the panel reads `score`.
+      setVoiceCheck({ ...res.data, score: res.data.voice_match_score })
       toast.success(`Voice match: ${Math.round(res.data.voice_match_score * 100)}%`)
     } catch {
       toast.error('Voice check failed')
@@ -521,6 +527,16 @@ export default function ChapterEditor() {
               lastIndexedHtmlRef.current = content
             }}
           />
+        ) : tab === 'plan' ? (
+          <PlanPanel
+            key={chapter?.id}
+            projectId={projectId!}
+            chapterId={chapterId!}
+            intent={chapter?.intent}
+            keyPoints={chapter?.key_points}
+            scenes={chapter?.scenes}
+            onSaved={(update) => setChapter((c) => (c ? { ...c, ...update } : c))}
+          />
         ) : tab === 'notes' ? (
           <ChapterNotesPanel projectId={projectId!} chapterId={chapterId!} />
         ) : tab === 'actions' ? (
@@ -564,12 +580,29 @@ export default function ChapterEditor() {
                   <p><span className="font-medium text-seal-400">Cadence:</span> {voiceCheck.cadence_delta === undefined ? 'Run a fresh check to compare cadence.' : `${voiceCheck.cadence_delta >= 0 ? 'Slightly more flowing' : 'Slightly more punchy'} than your baseline`}</p>
                   {voiceCheck.phrase_matches && voiceCheck.phrase_matches.length > 0 && <p><span className="font-medium text-seal-400">Voice signals found:</span> {voiceCheck.phrase_matches.join(' · ')}</p>}
                   {voiceCheck.scripture_matches && voiceCheck.scripture_matches.length > 0 && <p><span className="font-medium text-seal-400">Anchor scriptures used:</span> {voiceCheck.scripture_matches.join(' · ')}</p>}
+                  {voiceCheck.fiction_signals && (
+                    <p title="Approximate — based on word counts in the narration">
+                      <span className="font-medium text-seal-400">Narration (approx.):</span>{' '}
+                      {voiceCheck.fiction_signals.pov} · {voiceCheck.fiction_signals.tense} tense · {Math.round(voiceCheck.fiction_signals.dialogue_ratio * 100)}% dialogue
+                    </p>
+                  )}
                   {(!voiceCheck.phrase_matches || voiceCheck.phrase_matches.length === 0) && (!voiceCheck.scripture_matches || voiceCheck.scripture_matches.length === 0) && <p>Check the chapter after adding more of your own language{pack.usesScripture ? ' or scripture anchors' : ''} to see evidence here.</p>}
                 </div>
               </div>
             )}
 
             {/* Consistency against the book bible */}
+            {pack.verifiesQuotes && (
+              <QuoteCheck
+                projectId={projectId!}
+                chapterId={chapterId!}
+                disabled={!!actionLoading}
+                beforeCheck={async () => {
+                  if (editor) await autoSave(editor.getHTML(), editor.storage.characterCount.words())
+                }}
+              />
+            )}
+
             <ConsistencyCheck
               projectId={projectId!}
               chapterId={chapterId!}

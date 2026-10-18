@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Feather, GitCommit, TrendingUp, TrendingDown, Minus, BookOpen, Activity, Pencil } from 'lucide-react'
 import { api } from '@/lib/api'
-import { PACKS, getPack, type PackId } from '@/lib/packs'
+import { PACK_CHOICES, getPack, type PackId } from '@/lib/packs'
 import { useAuthStore, usePack } from '@/stores/authStore'
 import toast from 'react-hot-toast'
 
@@ -125,7 +125,7 @@ export default function VoiceProfile() {
             <div>
               <label className="block text-sm text-study-400 mb-1.5">Book type</label>
               <select value={editPack} onChange={(e) => setEditPack(e.target.value as PackId)} className="input-field w-full">
-                {[PACKS.general, PACKS.christian].map((option) => (
+                {PACK_CHOICES.map((option) => (
                   <option key={option.id} value={option.id}>{option.name}</option>
                 ))}
               </select>

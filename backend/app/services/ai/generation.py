@@ -128,6 +128,24 @@ RULES:
     return brief
 
 
+def format_scene_plan(scenes, section_noun: str) -> str:
+    """The chapter's planned scenes/sections as a prompt block ("" if none)."""
+    lines = []
+    for i, scene in enumerate(s for s in (scenes or []) if isinstance(s, dict) and (s.get("title") or "").strip()):
+        details = [
+            f"POV: {scene['pov']}" if (scene.get("pov") or "").strip() else "",
+            f"Setting: {scene['setting']}" if (scene.get("setting") or "").strip() else "",
+        ]
+        meta = "; ".join(d for d in details if d)
+        line = f"  {i + 1}. {scene['title'].strip()}" + (f" [{meta}]" if meta else "")
+        if (scene.get("summary") or "").strip():
+            line += f" — {scene['summary'].strip()}"
+        lines.append(line)
+    if not lines:
+        return ""
+    return f"{section_noun.capitalize()} Plan (write these {section_noun}s, in this order):\n" + "\n".join(lines)
+
+
 async def retrieve_relevant_context(
     user_id: str,
     query: str,
@@ -232,11 +250,8 @@ async def generate_chapter_stream(
     # Build chapter brief
     pack = pack_for(profile)
     testimonies_text = "\n\n".join(context["testimonies"]) if context["testimonies"] else "None retrieved."
-    grounding = (
-        "- Anchor each major point to scripture (from the list above only)"
-        if pack.uses_scripture
-        else "- Ground each major point in the key references, stories and samples above — invent nothing"
-    )
+    grounding = f"- {pack.grounding_instruction}"
+    scene_plan = format_scene_plan(getattr(chapter, "scenes", None), pack.section_noun)
     relevant_samples = "\n---\n".join(context["samples"]) if context["samples"] else ""
 
     chapter_prompt = f"""{voice_brief}
@@ -259,7 +274,9 @@ Intent (what this chapter must accomplish):
 {chapter.intent or 'Not specified'}
 
 Key Points to Cover:
-{chr(10).join(f'  {i+1}. {p}' for i, p in enumerate(chapter.key_points or []))}
+{chr(10).join(f'  {i+1}. {p}' for i, p in enumerate(chapter.key_points or [])) or '  (none specified)'}
+
+{scene_plan}
 
 {pack.reference_label} for This Chapter:
 {chr(10).join(f'  • {s}' for s in (chapter.anchor_scriptures or [])) or '  • (none specified)'}
@@ -275,8 +292,9 @@ GENERATION INSTRUCTIONS
 ════════════════════════════════════════
 Write the full chapter draft. Target 1,500–2,500 words.
 - Open with a strong hook in this author's exact voice
-- Weave the story in naturally — not as an insert but as part of the argument
+- {'Use the story material only as inspiration — this is fiction' if pack.is_fiction else 'Weave the story in naturally — not as an insert but as part of the argument'}
 {grounding}
+- {f'Follow the {pack.section_noun} plan above in order' + (', separating scenes with a line containing only * * *' if pack.is_fiction else '') if scene_plan else 'Structure the chapter as this author would'}
 - {pack.closing_instruction}
 - Use their signature phrases naturally, not mechanically
 - Stay consistent with the established book facts: names, facts, terms and timeline must match them

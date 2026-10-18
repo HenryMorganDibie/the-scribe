@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Chapter
 from app.services.ai.json_utils import strip_json_fences
 from app.services.ai.llm_client import get_llm_client
-from app.services.book_bible import format_entries, relevant_entries
+from app.services.book_bible import format_entries, format_timeline, relevant_entries, timeline
 from app.services.export.docx_export import html_to_plain
 
 REPETITION_THRESHOLD = 0.9
@@ -96,14 +96,21 @@ async def check_chapter_against_bible(db: AsyncSession, project, chapter: Chapte
     if not chapter_text:
         return {"checked_entries": 0, "issues": []}
 
-    entries = await relevant_entries(db, project.id, chapter_text[:2000], chapter_id=chapter.id, top_k=12)
-    if not entries:
+    events = await timeline(db, project.id)
+    entries = [
+        e for e in await relevant_entries(db, project.id, chapter_text[:2000], chapter_id=chapter.id, top_k=12)
+        if e.kind != "event"
+    ]
+    if not entries and not events:
         return {"checked_entries": 0, "issues": []}
 
+    facts = format_entries(entries, body_limit=800) if entries else "  (none relevant)"
     prompt = f"""You are a meticulous continuity editor for the book "{project.title}".
 
 ESTABLISHED BOOK FACTS (the author's notes — treat these as correct):
-{format_entries(entries, body_limit=800)}
+{facts}
+
+{format_timeline(events) if events else ''}
 
 CHAPTER {chapter.chapter_number}: {chapter.title}
 {chapter_text[:MAX_CHAPTER_CHARS]}
@@ -116,4 +123,4 @@ Return ONLY a JSON array (empty if there are no contradictions):
 [{{"entry": "title of the fact it contradicts", "quote": "exact sentence copied from the chapter", "issue": "what conflicts and how"}}]"""
 
     result = await get_llm_client().complete(messages=[{"role": "user", "content": prompt}], max_tokens=1200)
-    return {"checked_entries": len(entries), "issues": parse_issues(result.text, chapter_text)}
+    return {"checked_entries": len(entries) + len(events), "issues": parse_issues(result.text, chapter_text)}

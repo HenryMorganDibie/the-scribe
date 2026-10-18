@@ -5,7 +5,7 @@ describe('book bible kinds', () => {
   it('matches the kinds the API accepts', () => {
     // backend/app/api/routes/book_bible.py — EntryKind
     expect(ENTRY_KINDS.map((k) => k.kind).sort()).toEqual(
-      ['character', 'note', 'place', 'research', 'source', 'term'],
+      ['character', 'event', 'note', 'place', 'research', 'source', 'term'],
     )
   })
 

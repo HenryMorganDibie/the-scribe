@@ -26,6 +26,7 @@ from app.services.security.rate_limits import consume_user_quota
 from app.services.packs import pack_for
 from app.services.chapter_versions import snapshot_chapter
 from app.services.book_bible import book_context
+from app.services.style_signals import fiction_signals
 
 router = APIRouter(prefix="/generate", tags=["generation"])
 
@@ -268,6 +269,8 @@ Passage:
         "phrase_matches": analysis["phrase_matches"],
         "phrase_usage_rate": analysis["phrase_usage_rate"],
         "scripture_matches": analysis["scripture_matches"],
+        # Approximate POV / tense / dialogue share — fiction only.
+        "fiction_signals": fiction_signals(body.text) if pack_for(profile).is_fiction else None,
     }
 
 

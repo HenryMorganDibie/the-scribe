@@ -295,6 +295,8 @@ class Chapter(Base):
     key_points: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text))
     anchor_scriptures: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
     testimony_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
+    # Ordered plan of the chapter's scenes/sections: [{title, summary, pov, setting}]
+    scenes: Mapped[Optional[List[dict]]] = mapped_column(JSONB)
 
     # Content
     content: Mapped[Optional[str]] = mapped_column(Text)  # Rich text (HTML from TipTap)
@@ -369,9 +371,12 @@ class BookEntry(Base):
     # Optional: notes/research attached to one chapter rather than the whole book.
     chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True)
 
-    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # character|place|term|source|note|research
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # character|place|term|event|source|note|research
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Timeline events only: a display label ("Spring 1998", "Day 3") and a sort position.
+    when_label: Mapped[Optional[str]] = mapped_column(String(120))
+    timeline_order: Mapped[Optional[int]] = mapped_column(Integer)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

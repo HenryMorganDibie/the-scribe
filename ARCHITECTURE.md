@@ -6,8 +6,10 @@ have already written or spoken before it generates a single word.
 
 Genre-specific wording and features live in **packs**
 (`backend/app/services/packs.py`, mirrored in `frontend/src/lib/packs.ts`).
-`voice_profiles.pack` selects one per user (`general` by default; existing
-users were backfilled to `christian`). Packs reuse existing columns under
+`voice_profiles.pack` selects one per user: `general` (non-fiction, the
+default), `fiction` or `christian` (existing users were backfilled to
+`christian`; general users whose genre was "Fiction" moved to `fiction`
+in migration 0010). Packs reuse existing columns under
 their own labels — e.g. `theological_lens` is the general pack's genre and
 `theological_guardrails` its style rules — so adding a pack never moves data.
 Routes and table names (`/sermons`, `testimonies`, `scriptures`) are unchanged.

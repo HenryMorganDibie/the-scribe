@@ -8,7 +8,8 @@ verification. Existing DB columns are reused under pack-specific labels
 (e.g. `theological_lens` is the "genre" for the general pack), so adding a
 pack never moves data.
 
-Christian is the original pack; `general` is the default for new users.
+Packs: `general` (non-fiction — the default for new users), `fiction`, and
+`christian` (the original pack).
 """
 from dataclasses import dataclass
 from typing import Literal, Optional
@@ -16,7 +17,7 @@ from typing import Literal, Optional
 DEFAULT_PACK = "general"
 
 # Request-validation type for API bodies that accept a pack id.
-PackId = Literal["christian", "general"]
+PackId = Literal["christian", "general", "fiction"]
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,10 @@ class Pack:
     dna_subject: str              # "ministry DNA" / "writing DNA"
     focus_noun: str               # "{lens} ministry centered on X"
     preview_topic: str
+    grounding_instruction: str    # chapter-generation rule for supporting each point
+    section_noun: str             # what a chapter's planned units are called: "section" / "scene"
+    is_fiction: bool = False      # scene plans, POV/tense/dialogue signals, story-craft prompts
+    verifies_quotes: bool = False # quote verification against the book's sources
 
 
 CHRISTIAN = Pack(
@@ -64,6 +69,8 @@ CHRISTIAN = Pack(
     dna_subject="ministry DNA",
     focus_noun="ministry",
     preview_topic="the moment God calls someone into their purpose",
+    grounding_instruction="Anchor each major point to scripture (from the list above only)",
+    section_noun="section",
 )
 
 GENERAL = Pack(
@@ -87,9 +94,38 @@ GENERAL = Pack(
     dna_subject="writing DNA",
     focus_noun="writing",
     preview_topic="a turning point that changes how someone sees their work or life",
+    grounding_instruction="Ground each major point in the key references, stories and samples above — invent nothing",
+    section_noun="section",
+    verifies_quotes=True,
 )
 
-PACKS: dict[str, Pack] = {p.id: p for p in (CHRISTIAN, GENERAL)}
+FICTION = Pack(
+    id="fiction",
+    author_noun="a novelist",
+    lens_label="GENRE",
+    default_lens="Literary fiction",
+    background_label="AUTHOR BACKGROUND",
+    default_audience="Readers of the genre",
+    rules_label="STYLE RULES",
+    default_rule="Keep point of view, tense and established story facts consistent; never break the story's internal logic.",
+    uses_scripture=False,
+    reference_label="Continuity Notes",
+    reference_rule="Never contradict established story facts — characters, places, timeline; don't introduce major new named characters or places unless the brief asks for them.",
+    story_label="Story Material",
+    story_examples="anecdotes, vivid scenes, characters or real events that could inspire fiction",
+    source_noun="source",
+    closing_instruction="End on a hook, turn or open question that pulls the reader into the next chapter",
+    chat_persona="Be direct, warm, and attentive to story craft — character, tension, pacing.",
+    editor_role="a developmental editor for fiction",
+    dna_subject="writing DNA",
+    focus_noun="fiction",
+    preview_topic="a character at the moment they make a choice they can't take back",
+    grounding_instruction="Write in scenes: show, don't tell; keep point of view and tense consistent; let dialogue carry character",
+    section_noun="scene",
+    is_fiction=True,
+)
+
+PACKS: dict[str, Pack] = {p.id: p for p in (CHRISTIAN, GENERAL, FICTION)}
 
 
 def get_pack(pack_id: Optional[str]) -> Pack:

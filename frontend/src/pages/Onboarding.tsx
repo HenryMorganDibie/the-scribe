@@ -1,11 +1,11 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronRight, ChevronLeft, Sparkles, Loader2, BookOpen, PenLine } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Sparkles, Loader2, BookOpen, PenLine, Feather } from 'lucide-react'
 import toast from 'react-hot-toast'
 import QuillLogo from '@/components/ui/QuillLogo'
 import { api, streamSSE } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
-import { PACKS, type PackId } from '@/lib/packs'
+import { PACKS, PACK_CHOICES, type PackId } from '@/lib/packs'
 
 export default function Onboarding() {
   const [packId, setPackId] = useState<PackId | null>(null)
@@ -155,10 +155,10 @@ export default function Onboarding() {
           <p className="text-seal text-sm font-medium mb-2">Start your first manuscript</p>
           <h1 className="font-display text-display-md font-semibold mb-3">What are you writing?</h1>
           <p className="text-study-300 mb-8 max-w-2xl">This tailors the interview and the tools you'll see. You can change it later from your voice profile.</p>
-          <div className="grid md:grid-cols-2 gap-5">
-            {[PACKS.general, PACKS.christian].map((option) => (
+          <div className="grid md:grid-cols-3 gap-5">
+            {PACK_CHOICES.map((option) => (
               <button key={option.id} onClick={() => choosePack(option.id)} className="card p-6 text-left hover:border-seal transition-colors">
-                {option.usesScripture ? <BookOpen size={24} className="text-seal mb-4" /> : <PenLine size={24} className="text-seal mb-4" />}
+                {option.usesScripture ? <BookOpen size={24} className="text-seal mb-4" /> : option.isFiction ? <Feather size={24} className="text-seal mb-4" /> : <PenLine size={24} className="text-seal mb-4" />}
                 <h2 className="font-display text-xl font-semibold mb-2">{option.name}</h2>
                 <p className="text-sm text-study-300">{option.tagline}</p>
               </button>

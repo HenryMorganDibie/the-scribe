@@ -1,6 +1,6 @@
 /** Book bible entry kinds — mirrors backend/app/services/book_bible.py. */
 
-export type EntryKind = 'character' | 'place' | 'term' | 'source' | 'note' | 'research'
+export type EntryKind = 'character' | 'place' | 'term' | 'event' | 'source' | 'note' | 'research'
 
 export interface BookEntry {
   id: string
@@ -8,6 +8,8 @@ export interface BookEntry {
   title: string
   body: string
   chapter_id: string | null
+  when_label: string | null
+  timeline_order: number | null
   created_at: string
   updated_at: string
 }
@@ -16,6 +18,7 @@ export const ENTRY_KINDS: { kind: EntryKind; label: string; plural: string; hint
   { kind: 'character', label: 'Character', plural: 'Characters', hint: 'People in the book — who they are, how they speak, what they want.' },
   { kind: 'place', label: 'Place', plural: 'Places', hint: 'Settings and locations, with the details that must stay consistent.' },
   { kind: 'term', label: 'Term', plural: 'Terms', hint: 'Names, concepts and vocabulary the book defines or relies on.' },
+  { kind: 'event', label: 'Timeline event', plural: 'Timeline', hint: 'What happens when. The Scribe always sees the whole timeline, in order, and never reorders it.' },
   { kind: 'source', label: 'Source', plural: 'Sources', hint: 'Books, articles, interviews and quotes you are drawing on.' },
   { kind: 'research', label: 'Research', plural: 'Research', hint: 'Facts, findings and clippings to ground the writing.' },
   { kind: 'note', label: 'Note', plural: 'Notes', hint: 'Anything else: plans, reminders, ideas for later chapters.' },

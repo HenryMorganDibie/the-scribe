@@ -228,6 +228,18 @@ async def test_onboarding_rejects_unknown_pack():
         )
 
 
+async def test_fiction_onboarding_turns_pov_and_tense_into_the_first_style_rule():
+    profile = _profile("general", onboarding_step=0)
+    await onboarding.complete_onboarding(
+        onboarding.OnboardingComplete(data={
+            "pack": "fiction", "pov_tense": "Third person limited, past tense", "style_rules": ["No adverbs"],
+        }),
+        SimpleNamespace(id="u1", onboarded=False), ProfileSession(profile),
+    )
+    assert profile.pack == "fiction"
+    assert profile.theological_guardrails == ["Point of view and tense: Third person limited, past tense", "No adverbs"]
+
+
 async def test_onboarding_complete_stores_pack_and_style_rules():
     profile = _profile("general", onboarding_step=0)
     db = ProfileSession(profile)

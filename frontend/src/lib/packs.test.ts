@@ -36,6 +36,32 @@ describe('general pack', () => {
   })
 })
 
+describe('fiction pack', () => {
+  const pack = PACKS.fiction
+
+  it('is selectable and has fiction tools, not non-fiction ones', () => {
+    expect(getPack('fiction').id).toBe('fiction')
+    expect(pack.isFiction).toBe(true)
+    expect(pack.verifiesQuotes).toBe(false)
+    expect(pack.usesScripture).toBe(false)
+    expect(pack.section).toEqual({ singular: 'scene', plural: 'scenes' })
+  })
+
+  it('asks about point of view and tense, with no Christian wording', () => {
+    expect(pack.steps.map((s) => s.key)).toContain('pov_tense')
+    for (const step of pack.steps) {
+      const text = [step.question, step.subtext, step.placeholder, ...(step.options ?? [])].join(' ')
+      expect(text, step.key).not.toMatch(CHRISTIAN_TERMS)
+    }
+  })
+
+  it('takes fiction out of the non-fiction pack', () => {
+    const genres = PACKS.general.steps.find((s) => s.key === 'theological_lens')?.options ?? []
+    expect(genres.some((g) => /fiction/i.test(g) && !/non-fiction/i.test(g))).toBe(false)
+    expect(PACKS.general.verifiesQuotes).toBe(true)
+  })
+})
+
 describe('christian pack', () => {
   it('keeps the original labels and interview for existing users', () => {
     const pack = PACKS.christian

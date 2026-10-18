@@ -227,10 +227,20 @@ class ChapterCreate(BaseModel):
     testimony_ids: Optional[List[str]] = []
 
 
+class SceneItem(BaseModel):
+    """One planned scene (fiction) or section (non-fiction) of a chapter."""
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=2_000)
+    pov: str = Field(default="", max_length=120)
+    setting: str = Field(default="", max_length=200)
+
+
 class ChapterUpdate(BaseModel):
-    title: Optional[str] = None
-    intent: Optional[str] = None
-    key_points: Optional[List[str]] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    intent: Optional[str] = Field(default=None, max_length=4_000)
+    key_points: Optional[List[str]] = Field(default=None, max_length=30)
+    # Ordered scene/section plan; [] clears it.
+    scenes: Optional[List[SceneItem]] = Field(default=None, max_length=40)
     anchor_scriptures: Optional[List[str]] = None
     testimony_ids: Optional[List[str]] = None
     content: Optional[str] = None

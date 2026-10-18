@@ -8,9 +8,14 @@ author's own material via embeddings rather than stuffing everything into one pr
 and remembering what earlier chapters already said.
 
 Genre-specific behaviour comes from **packs** (`backend/app/services/packs.py`,
-`frontend/src/lib/packs.ts`). The `general` pack covers fiction, memoir, business,
-academic and other non-fiction; the `christian` pack — the product's original focus —
-adds sermons, testimonies and scripture verification against a real verse index.
+`frontend/src/lib/packs.ts`):
+
+- `general` — non-fiction (memoir, business, self-help, academic, history), with quote
+  verification against the book's own sources;
+- `fiction` — novels and short stories, with scene plans, a timeline and POV/tense/dialogue
+  signals;
+- `christian` — the product's original focus: sermons, testimonies and scripture
+  verification against a real verse index.
 See [docs/ROADMAP.md](docs/ROADMAP.md) for where this is heading.
 
 ---

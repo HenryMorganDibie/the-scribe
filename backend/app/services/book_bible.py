@@ -22,19 +22,25 @@ from app.services.voice.embeddings import embedding_service
 
 logger = structlog.get_logger()
 
-ENTRY_KINDS = ("character", "place", "term", "source", "note", "research")
+ENTRY_KINDS = ("character", "place", "term", "event", "source", "note", "research")
 KIND_LABELS = {
     "character": "Character",
     "place": "Place",
     "term": "Term",
+    "event": "Timeline event",
     "source": "Source",
     "note": "Note",
     "research": "Research",
 }
 
 
+def _heading(entry: BookEntry) -> str:
+    when = f" ({entry.when_label})" if getattr(entry, "when_label", None) else ""
+    return f"{entry.title}{when}"
+
+
 def _entry_text(entry: BookEntry) -> str:
-    return f"{KIND_LABELS.get(entry.kind, entry.kind)}: {entry.title}\n{entry.body or ''}".strip()
+    return f"{KIND_LABELS.get(entry.kind, entry.kind)}: {_heading(entry)}\n{entry.body or ''}".strip()
 
 
 async def index_entry(db: AsyncSession, entry: BookEntry) -> None:
@@ -119,19 +125,45 @@ async def relevant_source_passages(db: AsyncSession, project: Project, query: st
 
 def format_entries(entries: list[BookEntry], *, body_limit: int = 600) -> str:
     return "\n".join(
-        f"  • [{KIND_LABELS.get(e.kind, e.kind)}] {e.title}: {(e.body or '').strip()[:body_limit]}".rstrip(": ")
+        f"  • [{KIND_LABELS.get(e.kind, e.kind)}] {_heading(e)}: {(e.body or '').strip()[:body_limit]}".rstrip(": ")
         for e in entries
     )
+
+
+MAX_TIMELINE_EVENTS = 40
+
+
+async def timeline(db: AsyncSession, project_id: str) -> list[BookEntry]:
+    """The book's timeline events in story order (unordered events last, oldest first)."""
+    result = await db.execute(
+        select(BookEntry)
+        .where(BookEntry.project_id == project_id, BookEntry.kind == "event")
+        .order_by(BookEntry.timeline_order.asc().nulls_last(), BookEntry.created_at)
+        .limit(MAX_TIMELINE_EVENTS)
+    )
+    return list(result.scalars().all())
+
+
+def format_timeline(events: list[BookEntry], *, body_limit: int = 300) -> str:
+    lines = [
+        f"  {i}. {_heading(e)}" + (f" — {(e.body or '').strip()[:body_limit]}" if (e.body or "").strip() else "")
+        for i, e in enumerate(events, start=1)
+    ]
+    return "TIMELINE (events in story order — never reorder or contradict them):\n" + "\n".join(lines)
 
 
 async def book_context(
     db: AsyncSession, project: Project, query: str, *, chapter_id: Optional[str] = None,
 ) -> str:
-    """Prompt section with this book's relevant bible entries and source passages ("" if none)."""
-    entries = await relevant_entries(db, project.id, query, chapter_id=chapter_id)
+    """Prompt section with this book's timeline, relevant bible entries and source passages ("" if none)."""
+    events = await timeline(db, project.id)
+    # Events are already listed in full, in order, under TIMELINE.
+    entries = [e for e in await relevant_entries(db, project.id, query, chapter_id=chapter_id) if e.kind != "event"]
     passages = await relevant_source_passages(db, project, query)
 
     sections = []
+    if events:
+        sections.append(format_timeline(events))
     if entries:
         sections.append(
             "ESTABLISHED BOOK FACTS (the author's notes on this book — stay consistent with them, never contradict them):\n"

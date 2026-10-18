@@ -1,4 +1,4 @@
-"""Extract plain text from an uploaded sermon source (PDF, DOCX, or pasted text)."""
+"""Extract plain text from an uploaded source (PDF, DOCX, TXT/Markdown, or pasted text)."""
 import io
 
 
@@ -26,6 +26,9 @@ def extract_text(source_type: str, *, file_bytes: bytes | None = None, text_valu
         result = _extract_pdf(file_bytes or b"")
     elif source_type == "docx":
         result = _extract_docx(file_bytes or b"")
+    elif source_type == "txt":
+        # Plain text / Markdown (blog posts, exported notes). Tolerate odd encodings.
+        result = (file_bytes or b"").decode("utf-8-sig", errors="replace").strip()
     else:
         raise ValueError(f"Unsupported source_type for text extraction: {source_type!r}")
 

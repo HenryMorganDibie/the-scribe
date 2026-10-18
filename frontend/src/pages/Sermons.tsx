@@ -118,11 +118,11 @@ export default function Sermons() {
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.docx,.mp3,.m4a,.wav,.mpga"
+            accept=".pdf,.docx,.txt,.md,.mp3,.m4a,.wav,.mpga"
             className="block text-sm text-study-400"
           />
           <p className="text-xs text-study-300 mt-1">
-            PDF, DOCX, or audio (.mp3/.m4a/.wav, up to 25MB). Video files aren't supported yet —
+            PDF, DOCX, plain text or Markdown, or audio such as talks and podcasts (.mp3/.m4a/.wav, up to 25MB). Video files aren't supported yet —
             extract the audio first if you have a recording.
           </p>
         </div>

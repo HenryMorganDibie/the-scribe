@@ -17,9 +17,11 @@ interface Draft {
   title: string
   body: string
   chapter_id: string
+  when_label: string
+  timeline_order: string
 }
 
-const emptyDraft = (kind: EntryKind): Draft => ({ kind, title: '', body: '', chapter_id: '' })
+const emptyDraft = (kind: EntryKind): Draft => ({ kind, title: '', body: '', chapter_id: '', when_label: '', timeline_order: '' })
 
 export default function BookBible() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -58,15 +60,23 @@ export default function BookBible() {
     e.preventDefault()
     if (!draft || !draft.title.trim()) return
     setSaving(true)
-    const payload = { kind: draft.kind, title: draft.title, body: draft.body }
+    const isEvent = draft.kind === 'event'
+    const order = draft.timeline_order.trim() === '' ? null : Number(draft.timeline_order)
+    const payload = {
+      kind: draft.kind, title: draft.title, body: draft.body,
+      when_label: isEvent ? draft.when_label : '',
+    }
     try {
       if (draft.id) {
         await api.put(`/projects/${projectId}/bible/${draft.id}`, {
           ...payload,
           ...(draft.chapter_id ? { chapter_id: draft.chapter_id } : { detach_chapter: true }),
+          ...(isEvent && order !== null ? { timeline_order: order } : { clear_timeline_order: true }),
         })
       } else {
-        await api.post(`/projects/${projectId}/bible`, { ...payload, chapter_id: draft.chapter_id || null })
+        await api.post(`/projects/${projectId}/bible`, {
+          ...payload, chapter_id: draft.chapter_id || null, timeline_order: isEvent ? order : null,
+        })
       }
       setDraft(null)
       load()
@@ -128,6 +138,25 @@ export default function BookBible() {
               placeholder="Name or title"
             />
           </div>
+          {draft.kind === 'event' && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                value={draft.when_label}
+                onChange={(e) => setDraft({ ...draft, when_label: e.target.value })}
+                maxLength={120}
+                className="input-field sm:col-span-2"
+                placeholder="When — e.g. Spring 1998, Day 3, Before the war"
+              />
+              <input
+                type="number"
+                value={draft.timeline_order}
+                onChange={(e) => setDraft({ ...draft, timeline_order: e.target.value })}
+                className="input-field"
+                placeholder="Order (1, 2, 3…)"
+                aria-label="Position in the timeline"
+              />
+            </div>
+          )}
           <textarea
             value={draft.body}
             onChange={(e) => setDraft({ ...draft, body: e.target.value })}
@@ -176,11 +205,18 @@ export default function BookBible() {
                   <p className="text-xs text-seal uppercase tracking-wide">
                     {kindLabel(e.kind)}{chapterName(e.chapter_id) ? ` · ${chapterName(e.chapter_id)}` : ''}
                   </p>
-                  <h3 className="font-display font-semibold">{e.title}</h3>
+                  <h3 className="font-display font-semibold">
+                    {e.kind === 'event' && e.timeline_order !== null && <span className="text-study-300 font-mono text-sm mr-2">#{e.timeline_order}</span>}
+                    {e.title}
+                    {e.when_label && <span className="text-study-300 font-normal text-sm"> · {e.when_label}</span>}
+                  </h3>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   <button
-                    onClick={() => setDraft({ id: e.id, kind: e.kind, title: e.title, body: e.body, chapter_id: e.chapter_id ?? '' })}
+                    onClick={() => setDraft({
+                      id: e.id, kind: e.kind, title: e.title, body: e.body, chapter_id: e.chapter_id ?? '',
+                      when_label: e.when_label ?? '', timeline_order: e.timeline_order === null ? '' : String(e.timeline_order),
+                    })}
                     className="text-study-300 hover:text-seal" aria-label={`Edit ${e.title}`}
                   >
                     <Pencil size={15} />

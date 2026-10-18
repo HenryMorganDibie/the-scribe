@@ -327,8 +327,14 @@ async def complete_onboarding(
         if data["pack"] not in PACKS:
             raise HTTPException(status_code=400, detail="Unknown book type")
         profile.pack = data["pack"]
-    if "style_rules" in data and isinstance(data["style_rules"], list):
-        profile.theological_guardrails = [str(rule) for rule in data["style_rules"] if str(rule).strip()]
+    rules = []
+    if isinstance(data.get("pov_tense"), str) and data["pov_tense"].strip():
+        # Fiction interview: the narrative mode becomes the first style rule.
+        rules.append(f"Point of view and tense: {data['pov_tense'].strip()[:120]}")
+    if isinstance(data.get("style_rules"), list):
+        rules += [str(rule) for rule in data["style_rules"] if str(rule).strip()]
+    if rules:
+        profile.theological_guardrails = rules
     if "ministry_background" in data:
         profile.ministry_background = data["ministry_background"]
     if "theological_lens" in data:
