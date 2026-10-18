@@ -471,3 +471,27 @@ class Sermon(Base):
     __table_args__ = (
         Index("ix_sermons_user_status", "user_id", "status"),
     )
+
+
+# ─────────────────────────────────────────────
+# BACKGROUND JOBS
+# Durable queue for post-request work (summaries, indexing, voice DNA).
+# Rows survive restarts; app/services/jobs.py runs and retries them.
+# ─────────────────────────────────────────────
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending|running|done|failed
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    run_after: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    __table_args__ = (
+        Index("ix_jobs_status_run_after", "status", "run_after"),
+    )

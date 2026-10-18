@@ -65,7 +65,7 @@ Later improvements noticed while building Phase 2:
 - [ ] Cross-book writing stats and streak on the Dashboard
 - [ ] Weekly word target (alongside the daily one)
 
-## Phase 3 — Second pack, then fiction — done (except academic), pending commit
+## Phase 3 — Second pack, then fiction — done (except academic), commit `83ad538`
 
 - [x] **General non-fiction pack**
   - [x] Source ingestion copy and prompts for talks, podcasts, lectures, blog posts, interviews
@@ -86,13 +86,27 @@ Later improvements noticed while building Phase 3:
 
 ---
 
-## Carry-over from the code review (do alongside)
+## Hardening — before inviting more writers (first six items: pending commit)
+
+Reliability and security work left from the code review. Do these before new features.
+
+- [x] Multi-tab sessions: CSRF token is now derived from the session cookie, so every tab shares it
+- [x] First-chunk timeout on LLM providers (and an Ollama HTTP timeout) so failover actually happens
+- [x] Rate-limit the onboarding preview/complete, reprocess and DNA report endpoints; validate onboarding input sizes
+- [x] Fresh DB session inside streaming endpoints; error events (not silent cut-offs) when a stream fails
+- [x] Durable background jobs: job table + runner + recovery on startup; mark interrupted source uploads as failed (migration `0011`)
+- [x] Rate-limit client IP: `TRUSTED_PROXY_HOPS` picks the proxy-appended entry; `cf-connecting-ip` no longer trusted
+  - [ ] Still open: requests sent straight to the onrender.com URL can spoof their IP — needs a network restriction so only Vercel can reach the API
+- [ ] Browser test pass of every flow (onboarding per pack, editor tabs, book bible, progress, exports)
+- [ ] Upgrade unmaintained / old dependencies (`python-jose` → PyJWT, `passlib` → `bcrypt`, `anthropic` SDK, Anthropic model id)
+- [ ] Log every AI action in `generation_logs` (continue, chat, weave, companion, checks) so cost tracking is complete
+- [ ] Remove dead code / stale docs (dramatiq/Railway references, unused `supabase`, Render static-site frontend) — commented-out onboarding, `REDIS_URL` and `app/utils/jobs.py` already removed
+
+## Product quality
+
+- [ ] Redesign the voice match score (compare against the author's own samples + style features)
+
+## Done from the code review
 
 - [x] Logged-out reload loop, email casing, companion-chat quota/history, export filename crash, silent SSE errors — commit `4d0ce59`
 - [x] Chapter/project deletes (migration `0006`, integration test) — commit `ff299d5`
-- [ ] Rate-limit the onboarding preview/complete, reprocess and DNA report endpoints; validate onboarding input sizes
-- [ ] First-chunk timeout on LLM providers so failover actually happens
-- [ ] Durable background jobs (job table + recovery on startup) — more important with more source uploads
-- [ ] Redesign the voice match score (compare against the author's own samples + style features)
-- [ ] Fresh DB session inside streaming endpoints
-- [ ] Remove dead code / stale docs (commented-out onboarding, dramatiq/Railway references, unused deps)

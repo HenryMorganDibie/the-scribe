@@ -14,7 +14,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import BackgroundTasks
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -102,7 +101,7 @@ async def _save(db, s, content, *, explicit=False):
     await projects.update_chapter(
         s.project.id, s.chapter.id,
         projects.ChapterUpdate(content=content, trigger_indexing=explicit),
-        BackgroundTasks(), current_user=s.user, db=db,
+        current_user=s.user, db=db,
     )
 
 
@@ -138,7 +137,7 @@ async def test_restore_replaces_content_and_keeps_the_replaced_draft(db):
     first = (await db.execute(select(ChapterVersion).where(ChapterVersion.chapter_id == s.chapter.id))).scalar_one()
 
     result = await projects.restore_chapter_version(
-        s.project.id, s.chapter.id, first.id, BackgroundTasks(), current_user=s.user, db=db,
+        s.project.id, s.chapter.id, first.id, current_user=s.user, db=db,
     )
 
     assert result["content"] == "<p>First draft.</p>"

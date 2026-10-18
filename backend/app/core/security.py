@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -39,12 +40,23 @@ def hash_session_secret(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def csrf_token_for(session_token: str) -> str:
+    """The CSRF token for a session: an HMAC of the (HttpOnly) session cookie.
+
+    Deriving it — instead of storing a random token — means every tab of the
+    same session gets the same token from /auth/me, so reloading one tab no
+    longer invalidates the others. Page scripts can't compute it because they
+    can't read the session cookie, and it can't be forged without SECRET_KEY.
+    """
+    return hmac.new(settings.SECRET_KEY.encode(), f"csrf:{session_token}".encode(), hashlib.sha256).hexdigest()
+
+
 async def create_browser_session(db: AsyncSession, user_id: str) -> tuple[str, str]:
-    """Create an opaque cookie session and a separately supplied CSRF secret."""
+    """Create an opaque cookie session; returns (session token, CSRF token)."""
     from app.models import UserSession
 
     token = secrets.token_urlsafe(48)
-    csrf_token = secrets.token_urlsafe(32)
+    csrf_token = csrf_token_for(token)
     db.add(UserSession(
         user_id=user_id,
         token_hash=hash_session_secret(token),
@@ -94,9 +106,11 @@ def clear_browser_session_cookie(response: Response) -> None:
     )
 
 
-def require_csrf(request: Request, session) -> None:
+def require_csrf(request: Request, session=None) -> None:
+    """Reject a cookie-authenticated write unless it carries this session's CSRF token."""
     submitted = request.headers.get("X-CSRF-Token", "")
-    if not submitted or not secrets.compare_digest(hash_session_secret(submitted), session.csrf_token_hash):
+    session_token = request.cookies.get(settings.SESSION_COOKIE_NAME, "")
+    if not submitted or not session_token or not secrets.compare_digest(submitted, csrf_token_for(session_token)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid security token")
 
 

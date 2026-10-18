@@ -50,7 +50,14 @@ async def lifespan(app: FastAPI):
         environment=settings.ENVIRONMENT,
         llm_provider=settings.LLM_PROVIDER,
     )
+
+    # Durable background jobs: recover anything interrupted, then keep running
+    # queued work (see app/services/jobs.py).
+    from app.services.jobs import runner
+    if settings.JOBS_RUNNER_ENABLED:
+        runner.start()
     yield
+    await runner.stop()
     await engine.dispose()
     logger.info("the_scribe_api_shutdown")
 

@@ -1,18 +1,19 @@
 import json
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
 from pydantic import BaseModel, Field
 from typing import Literal, Optional, List
 
-from app.db.session import get_db
+from app.db.session import AsyncSessionLocal, get_db
+from app.api.sse import SSE_DONE, sse_error, sse_event, sse_text
 from app.models import User, Project, Chapter, ChapterVersion, DocumentEmbedding, Sermon, VoiceProfile
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.api.ownership import get_owned_chapter, get_owned_project
-from app.utils.jobs import fire_background_job
+from app.services.jobs import enqueue_job, wake_runner
 from app.services.ai.companion_chat import companion_chat_stream, save_message, get_history
 from app.services.ai.sermon_book import build_sermon_book_plan
 from app.services.packs import pack_for
@@ -330,7 +331,7 @@ async def reorder_chapters(project_id: str, body: ReorderRequest, current_user: 
 
 
 @router.put("/projects/{project_id}/chapters/{chapter_id}")
-async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     await get_owned_project(project_id, current_user.id, db)
     chapter = await get_owned_chapter(
         chapter_id,
@@ -361,15 +362,17 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
     # Schedule summary generation + companion-chat re-indexing if content
     # was updated AND trigger_indexing was explicitly requested.
     if body.content and body.trigger_indexing:
-        _schedule_chapter_indexing(background_tasks, chapter_id)
+        await _queue_chapter_indexing(db, chapter_id)
 
     return {"updated": True}
 
 
-def _schedule_chapter_indexing(background_tasks: BackgroundTasks, chapter_id: str) -> None:
-    from app.workers.tasks import generate_chapter_summary_task, index_chapter_task
-    fire_background_job(background_tasks, generate_chapter_summary_task, chapter_id, job_name="generate_chapter_summary")
-    fire_background_job(background_tasks, index_chapter_task, chapter_id, job_name="index_chapter")
+async def _queue_chapter_indexing(db: AsyncSession, chapter_id: str) -> None:
+    """Durably queue the chapter summary + re-index (see app/services/jobs.py)."""
+    await enqueue_job(db, "generate_chapter_summary", chapter_id=chapter_id)
+    await enqueue_job(db, "index_chapter", chapter_id=chapter_id)
+    await db.commit()
+    wake_runner()
 
 
 # ── Chapter draft history ─────────────────────
@@ -412,7 +415,7 @@ async def get_chapter_version(project_id: str, chapter_id: str, version_id: str,
 
 
 @router.post("/projects/{project_id}/chapters/{chapter_id}/versions/{version_id}/restore")
-async def restore_chapter_version(project_id: str, chapter_id: str, version_id: str, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def restore_chapter_version(project_id: str, chapter_id: str, version_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     chapter = await get_owned_chapter(chapter_id, current_user.id, db, project_id=project_id)
     version = await _get_owned_version(version_id, chapter, db)
 
@@ -422,7 +425,7 @@ async def restore_chapter_version(project_id: str, chapter_id: str, version_id: 
     chapter.word_count = version.word_count or 0
     await db.commit()
 
-    _schedule_chapter_indexing(background_tasks, chapter.id)
+    await _queue_chapter_indexing(db, chapter.id)
     return {"content": chapter.content, "word_count": chapter.word_count}
 
 
@@ -492,19 +495,24 @@ async def companion_chat(
     async def stream():
         buffer = []
         cited_ids: List[str] = []
-        async for chunk in companion_chat_stream(project_id, body.message, history, db):
-            if chunk.startswith("\n\n[CITED:"):
-                cited_str = chunk.replace("\n\n[CITED:", "").rstrip("]")
-                cited_ids[:] = [c for c in cited_str.split(",") if c]
-            else:
-                buffer.append(chunk)
-                yield f"data: {json.dumps({'text': chunk})}\n\n"
+        # Own session: the request's is closed before the response body streams.
+        async with AsyncSessionLocal() as sdb:
+            try:
+                async for chunk in companion_chat_stream(project_id, body.message, history, sdb):
+                    if chunk.startswith("\n\n[CITED:"):
+                        cited_str = chunk.replace("\n\n[CITED:", "").rstrip("]")
+                        cited_ids[:] = [c for c in cited_str.split(",") if c]
+                    else:
+                        buffer.append(chunk)
+                        yield sse_text(chunk)
+            except Exception as exc:
+                yield sse_error(exc, "companion_chat")
 
-        full_answer = "".join(buffer)
-        if full_answer.strip():
-            await save_message(project_id, current_user.id, "assistant", full_answer, db, referenced_chapter_ids=cited_ids)
+            full_answer = "".join(buffer)
+            if full_answer.strip():
+                await save_message(project_id, current_user.id, "assistant", full_answer, sdb, referenced_chapter_ids=cited_ids)
 
-        yield f"data: {json.dumps({'cited_chapter_ids': cited_ids})}\n\n"
-        yield "data: [DONE]\n\n"
+        yield sse_event({"cited_chapter_ids": cited_ids})
+        yield SSE_DONE
 
     return StreamingResponse(stream(), media_type="text/event-stream")

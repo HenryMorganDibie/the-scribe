@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(not TEST_DATABASE_URL, reason="TEST_DATABASE_URL
 async def _save_words(db, s, words: int):
     await projects.update_chapter(
         s.project.id, s.chapter.id, projects.ChapterUpdate(word_count=words),
-        projects.BackgroundTasks(), current_user=s.user, db=db,
+        current_user=s.user, db=db,
     )
 
 

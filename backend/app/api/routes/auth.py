@@ -13,10 +13,10 @@ from app.core.security import (
     clear_browser_session_cookie,
     create_access_token,
     create_browser_session,
+    csrf_token_for,
     get_browser_session,
     get_current_user,
     hash_password,
-    hash_session_secret,
     set_browser_session_cookie,
     verify_password,
 )
@@ -207,13 +207,13 @@ async def me(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # After a page reload, return a fresh CSRF secret for the browser to keep
-    # only in memory. The session cookie itself remains unreadable to JS.
+    # After a page reload, hand the browser its CSRF token to keep in memory.
+    # It's derived from the session cookie, so every tab gets the same one —
+    # reloading this tab doesn't break saves in the others.
     csrf_token = None
     session = await get_browser_session(request, db)
     if session:
-        csrf_token = secrets.token_urlsafe(32)
-        session.csrf_token_hash = hash_session_secret(csrf_token)
+        csrf_token = csrf_token_for(request.cookies[settings.SESSION_COOKIE_NAME])
         session.last_seen_at = datetime.utcnow()
         await db.commit()
     return {

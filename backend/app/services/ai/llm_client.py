@@ -23,6 +23,7 @@ LLM_PROVIDER controls the mode:
     when you deliberately want guaranteed-consistent output (e.g. final
     manuscript export) or need to isolate one provider while debugging.
 """
+import asyncio
 from typing import AsyncIterator, Awaitable, Callable, Optional
 from dataclasses import dataclass
 
@@ -163,7 +164,8 @@ class OllamaProvider:
 
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
 
-        async with httpx.AsyncClient(timeout=None) as client:
+        # Bounded waits: connecting, and the gap between streamed lines.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(settings.LLM_STREAM_READ_TIMEOUT_SECONDS, connect=10.0)) as client:
             async with client.stream("POST", f"{self._base_url}/api/chat", json=payload, headers=headers) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
@@ -185,15 +187,23 @@ class OllamaProvider:
 ProviderFactory = Callable[[], Awaitable[Optional[object]]]
 
 
+async def _close_quietly(gen) -> None:
+    try:
+        await gen.aclose()
+    except Exception:
+        pass
+
+
 class ProviderRouter:
     """Tries candidates in order, skipping anything in cooldown, and fails
     over silently on error. Commits to a candidate only after its first
     chunk arrives successfully, so a mid-request failure never produces
     output stitched together from two different providers."""
 
-    def __init__(self, candidates: list[ProviderFactory], health: ProviderHealthTracker):
+    def __init__(self, candidates: list[ProviderFactory], health: ProviderHealthTracker, first_chunk_timeout: Optional[float] = None):
         self._candidates = candidates
         self._health = health
+        self._first_chunk_timeout = first_chunk_timeout or settings.LLM_FIRST_CHUNK_TIMEOUT_SECONDS
         self.last_provider: Optional[object] = None
 
     async def stream(self, messages: list[dict], system: Optional[str], max_tokens: int) -> AsyncIterator[str]:
@@ -208,11 +218,18 @@ class ProviderRouter:
 
             gen = provider.stream(messages, system, max_tokens)
             try:
-                first_chunk = await gen.__anext__()
+                # A provider that accepts the request but never answers would
+                # otherwise hang the whole request instead of failing over.
+                first_chunk = await asyncio.wait_for(gen.__anext__(), timeout=self._first_chunk_timeout)
             except StopAsyncIteration:
                 self._health.record_success(provider.id)
                 self.last_provider = provider
                 return
+            except asyncio.TimeoutError:
+                self._health.record_failure(provider.id)
+                errors.append(f"{provider.id}: no response within {self._first_chunk_timeout:g}s")
+                await _close_quietly(gen)
+                continue
             except Exception as exc:
                 self._health.record_failure(provider.id, rate_limited=looks_rate_limited(exc))
                 errors.append(f"{provider.id}: {exc}")

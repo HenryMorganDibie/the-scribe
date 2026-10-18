@@ -59,7 +59,7 @@ async def test_scene_plan_round_trips_through_chapter_update(db):
     await projects.update_chapter(
         s.project.id, s.chapter.id,
         projects.ChapterUpdate(scenes=[{"title": "Crossing", "pov": "Ada"}, {"title": "Landfall"}]),
-        projects.BackgroundTasks(), current_user=s.user, db=db,
+        current_user=s.user, db=db,
     )
     scenes = (await db.execute(select(Chapter.scenes).where(Chapter.id == s.chapter.id))).scalar_one()
     assert [x["title"] for x in scenes] == ["Crossing", "Landfall"] and scenes[0]["pov"] == "Ada"

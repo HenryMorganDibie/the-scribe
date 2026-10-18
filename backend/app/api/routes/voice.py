@@ -1,15 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from pydantic import BaseModel
 from typing import Optional, List
 
 from app.db.session import get_db
-from app.models import User, VoiceProfile, Testimony, GenerationLog, Chapter
+from app.models import User, VoiceProfile, Testimony, GenerationLog, Chapter, DocumentEmbedding
 from app.core.security import get_current_user
 from app.services.voice.timeline import get_timeline, snapshot_voice, diff_versions
-from app.utils.jobs import fire_background_job
+from app.services.jobs import enqueue_job, wake_runner
 from app.services.packs import PackId, pack_for
+from app.core.config import settings
+from app.services.security.rate_limits import consume_user_quota
 
 router = APIRouter(tags=["voice"])
 
@@ -96,6 +98,8 @@ async def dna_report(current_user: User = Depends(get_current_user), db: AsyncSe
     metrics = compute_dna_metrics(profile, sermons, versions)
 
     if not profile.dna_narrative:
+        # Only a fresh narrative costs an AI call; cached reports are free.
+        await consume_user_quota(db, current_user.id, "ai_request", settings.AI_DAILY_REQUEST_LIMIT)
         narrative = await generate_dna_narrative(metrics, pack_for(profile))
         profile.dna_narrative = narrative
         await db.commit()
@@ -109,7 +113,6 @@ async def dna_report(current_user: User = Depends(get_current_user), db: AsyncSe
 
 @router.post("/voice-profile/reprocess")
 async def reprocess_voice_dna(
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -126,9 +129,11 @@ async def reprocess_voice_dna(
     if not profile.writing_samples:
         raise HTTPException(status_code=400, detail="No writing samples to process")
 
-    from app.workers.tasks import extract_voice_dna_task, index_writing_samples_task
-    fire_background_job(background_tasks, extract_voice_dna_task, current_user.id, job_name="extract_voice_dna")
-    fire_background_job(background_tasks, index_writing_samples_task, current_user.id, job_name="index_writing_samples")
+    await consume_user_quota(db, current_user.id, "ai_request", settings.AI_DAILY_REQUEST_LIMIT)
+    await enqueue_job(db, "extract_voice_dna", user_id=current_user.id)
+    await enqueue_job(db, "index_writing_samples", user_id=current_user.id)
+    await db.commit()
+    wake_runner()
 
     return {"reprocessing": True, "message": "Voice DNA extraction re-queued. Check back in 30 seconds."}
 
@@ -203,30 +208,30 @@ async def list_testimonies(
 
 
 @router.post("/testimonies", status_code=201)
-async def create_testimony(body: TestimonyCreate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def create_testimony(body: TestimonyCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     t = Testimony(user_id=current_user.id, **body.model_dump())
     db.add(t)
+    await db.flush()
+    # Index for vector retrieval (durable background job)
+    await enqueue_job(db, "index_testimony", user_id=current_user.id, testimony_id=t.id)
     await db.commit()
     await db.refresh(t)
-
-    # Index for vector retrieval — non-blocking, see app.utils.jobs
-    from app.workers.tasks import index_testimony_task
-    fire_background_job(background_tasks, index_testimony_task, current_user.id, t.id, t.story, job_name="index_testimony")
+    wake_runner()
 
     return {"id": t.id, "title": t.title}
 
 
 @router.post("/testimonies/{testimony_id}/approve")
-async def approve_testimony(testimony_id: str, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def approve_testimony(testimony_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Testimony).where(Testimony.id == testimony_id, Testimony.user_id == current_user.id))
     t = result.scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail="Testimony not found")
     t.status = "approved"
-    await db.commit()
     # Index for retrieval now that it's part of the vault
-    from app.workers.tasks import index_testimony_task
-    fire_background_job(background_tasks, index_testimony_task, current_user.id, t.id, t.story, job_name="index_testimony")
+    await enqueue_job(db, "index_testimony", user_id=current_user.id, testimony_id=t.id)
+    await db.commit()
+    wake_runner()
     return {"approved": True, "id": t.id}
 
 
@@ -238,7 +243,11 @@ async def update_testimony(testimony_id: str, body: TestimonyUpdate, current_use
         raise HTTPException(status_code=404, detail="Testimony not found")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(t, k, v)
+    if body.story is not None:
+        # Edited stories used to keep their old embedding forever.
+        await enqueue_job(db, "index_testimony", user_id=current_user.id, testimony_id=t.id)
     await db.commit()
+    wake_runner()
     return {"updated": True}
 
 
@@ -248,6 +257,10 @@ async def delete_testimony(testimony_id: str, current_user: User = Depends(get_c
     t = result.scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail="Testimony not found")
+    await db.execute(delete(DocumentEmbedding).where(
+        DocumentEmbedding.doc_type == "testimony", DocumentEmbedding.source_id == t.id,
+        DocumentEmbedding.user_id == current_user.id,
+    ))
     await db.delete(t)
     await db.commit()
 
