@@ -14,7 +14,7 @@ import structlog
 
 from app.core.config import settings
 from app.db.session import engine
-from app.api.routes import auth, onboarding, projects, voice, generate, export, sermons
+from app.api.routes import auth, onboarding, projects, voice, generate, export, sermons, book_bible, progress
 
 logger = structlog.get_logger()
 
@@ -50,7 +50,14 @@ async def lifespan(app: FastAPI):
         environment=settings.ENVIRONMENT,
         llm_provider=settings.LLM_PROVIDER,
     )
+
+    # Durable background jobs: recover anything interrupted, then keep running
+    # queued work (see app/services/jobs.py).
+    from app.services.jobs import runner
+    if settings.JOBS_RUNNER_ENABLED:
+        runner.start()
     yield
+    await runner.stop()
     await engine.dispose()
     logger.info("the_scribe_api_shutdown")
 
@@ -109,6 +116,8 @@ app.include_router(voice.router, prefix="/api")
 app.include_router(generate.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(sermons.router, prefix="/api")
+app.include_router(book_bible.router, prefix="/api")
+app.include_router(progress.router, prefix="/api")
 
 
 @app.get("/api/health")

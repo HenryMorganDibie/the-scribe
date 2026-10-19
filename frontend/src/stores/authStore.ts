@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api, setCsrfToken } from '@/lib/api'
+import { getPack } from '@/lib/packs'
 
 interface User {
   id: string
@@ -7,6 +8,7 @@ interface User {
   full_name: string
   onboarded: boolean
   avatar_url?: string
+  pack?: string
 }
 
 interface AuthState {
@@ -70,3 +72,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 }))
+
+/** The signed-in writer's genre pack (labels, onboarding steps, features). */
+export const usePack = () => getPack(useAuthStore((state) => state.user?.pack))

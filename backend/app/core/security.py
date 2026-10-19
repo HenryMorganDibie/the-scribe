@@ -1,9 +1,10 @@
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
+import jwt
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
@@ -12,16 +13,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
+# Passwords: bcrypt directly (passlib is unmaintained). Hashes made by the old
+# passlib setup are standard "$2b$" bcrypt and verify unchanged.
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        # Malformed hash, or a password over bcrypt's 72-byte limit.
+        return False
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -39,12 +45,23 @@ def hash_session_secret(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def csrf_token_for(session_token: str) -> str:
+    """The CSRF token for a session: an HMAC of the (HttpOnly) session cookie.
+
+    Deriving it — instead of storing a random token — means every tab of the
+    same session gets the same token from /auth/me, so reloading one tab no
+    longer invalidates the others. Page scripts can't compute it because they
+    can't read the session cookie, and it can't be forged without SECRET_KEY.
+    """
+    return hmac.new(settings.SECRET_KEY.encode(), f"csrf:{session_token}".encode(), hashlib.sha256).hexdigest()
+
+
 async def create_browser_session(db: AsyncSession, user_id: str) -> tuple[str, str]:
-    """Create an opaque cookie session and a separately supplied CSRF secret."""
+    """Create an opaque cookie session; returns (session token, CSRF token)."""
     from app.models import UserSession
 
     token = secrets.token_urlsafe(48)
-    csrf_token = secrets.token_urlsafe(32)
+    csrf_token = csrf_token_for(token)
     db.add(UserSession(
         user_id=user_id,
         token_hash=hash_session_secret(token),
@@ -94,9 +111,11 @@ def clear_browser_session_cookie(response: Response) -> None:
     )
 
 
-def require_csrf(request: Request, session) -> None:
+def require_csrf(request: Request, session=None) -> None:
+    """Reject a cookie-authenticated write unless it carries this session's CSRF token."""
     submitted = request.headers.get("X-CSRF-Token", "")
-    if not submitted or not secrets.compare_digest(hash_session_secret(submitted), session.csrf_token_hash):
+    session_token = request.cookies.get(settings.SESSION_COOKIE_NAME, "")
+    if not submitted or not session_token or not secrets.compare_digest(submitted, csrf_token_for(session_token)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid security token")
 
 
@@ -118,7 +137,7 @@ async def get_current_user(
             user_id: str = payload.get("sub")
             if user_id is None or payload.get("v") != 2:
                 raise credentials_exception
-        except JWTError:
+        except jwt.PyJWTError:
             raise credentials_exception
     else:
         session = await get_browser_session(request, db)

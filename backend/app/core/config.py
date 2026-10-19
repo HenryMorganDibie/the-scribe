@@ -67,7 +67,14 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "rotate"
 
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    ANTHROPIC_MODEL: str = "claude-opus-5-5"
+    # Claude thinks before answering (always on for current models) and that
+    # thinking counts toward max_tokens: this headroom is added to every reply
+    # budget so drafts aren't cut short. Unused tokens aren't billed.
+    ANTHROPIC_EFFORT: str = "medium"  # low | medium | high | xhigh | max
+    ANTHROPIC_THINKING_HEADROOM_TOKENS: int = 8000
+    # No text streams until thinking finishes, so allow longer than other providers.
+    ANTHROPIC_FIRST_CHUNK_TIMEOUT_SECONDS: float = 120.0
 
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "openai/gpt-oss-120b"
@@ -84,6 +91,12 @@ class Settings(BaseSettings):
     # generate a key at https://ollama.com/settings/keys.
     OLLAMA_API_KEY: str = ""
     OLLAMA_CLOUD_MODEL: str = "gpt-oss:120b"
+
+    # Failover timing. A provider that hasn't produced its first chunk within
+    # LLM_FIRST_CHUNK_TIMEOUT_SECONDS is skipped for the next one; an Ollama
+    # stream that goes silent for LLM_STREAM_READ_TIMEOUT_SECONDS is aborted.
+    LLM_FIRST_CHUNK_TIMEOUT_SECONDS: float = 45.0
+    LLM_STREAM_READ_TIMEOUT_SECONDS: float = 90.0
 
     # Google Sign-In uses a public OAuth web-client ID in the browser. The
     # backend verifies that every returned ID token was issued for this ID.
@@ -106,15 +119,18 @@ class Settings(BaseSettings):
     SIGNUP_RATE_LIMIT_ATTEMPTS: int = 5
     SIGNUP_RATE_LIMIT_WINDOW_MINUTES: int = 60
     AI_DAILY_REQUEST_LIMIT: int = 50
+    # How many proxies in front of the app append to X-Forwarded-For (see
+    # rate_limits._client_ip). 0 = none; Vercel rewrite → Render = 2.
+    TRUSTED_PROXY_HOPS: int = 0
     SERMON_DAILY_UPLOAD_LIMIT: int = 10
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
     MAX_PASTED_TEXT_CHARS: int = 200_000
 
     # ── Background jobs / embeddings ────────────────────────────
-    # Unused — kept only so old .env files with this key don't error on load.
-    # Background work runs in-process via FastAPI BackgroundTasks (see
-    # app/workers/tasks.py); there is no broker/worker to point at Redis for.
-    REDIS_URL: str = "redis://localhost:6379/0"
+    # Background work is queued in the Postgres `jobs` table and run by an
+    # in-process runner (app/services/jobs.py). Turn the runner off for a
+    # process that should only serve requests.
+    JOBS_RUNNER_ENABLED: bool = True
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # ── App ───────────────────────────────────────────────────────

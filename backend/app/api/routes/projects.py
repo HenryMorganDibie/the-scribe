@@ -1,19 +1,24 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from datetime import date
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 
-from app.db.session import get_db
-from app.models import User, Project, Chapter, Sermon, VoiceProfile
+from app.db.session import AsyncSessionLocal, get_db
+from app.api.sse import SSE_DONE, sse_error, sse_event, sse_text
+from app.models import User, Project, Chapter, ChapterVersion, DocumentEmbedding, Sermon, VoiceProfile
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.api.ownership import get_owned_chapter, get_owned_project
-from app.utils.jobs import fire_background_job
+from app.services.jobs import enqueue_job, wake_runner
 from app.services.ai.companion_chat import companion_chat_stream, save_message, get_history
 from app.services.ai.sermon_book import build_sermon_book_plan
+from app.services.packs import pack_for
+from app.services.chapter_versions import AUTOSAVE_INTERVAL, snapshot_chapter
+from app.services.progress import record_words
 from app.services.security.rate_limits import consume_user_quota
 
 router = APIRouter(tags=["projects"])
@@ -29,11 +34,22 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    title: Optional[str] = None
-    genre: Optional[str] = None
-    theme: Optional[str] = None
-    target_chapters: Optional[int] = None
-    status: Optional[str] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    genre: Optional[str] = Field(default=None, max_length=80)
+    theme: Optional[str] = Field(default=None, max_length=2_000)
+    target_chapters: Optional[int] = Field(default=None, ge=1, le=100)
+    status: Optional[str] = Field(default=None, max_length=20)
+    # Per-book style — empty string / empty list clears the override.
+    target_audience: Optional[str] = Field(default=None, max_length=2_000)
+    style_rules: Optional[List[str]] = Field(default=None, max_length=30)
+    style_notes: Optional[str] = Field(default=None, max_length=5_000)
+    # Linked source library (ids of the author's processed sources).
+    source_sermon_ids: Optional[List[str]] = Field(default=None, max_length=50)
+    # Goals. 0 clears a numeric goal; clear_deadline removes the deadline.
+    target_word_count: Optional[int] = Field(default=None, ge=0, le=2_000_000)
+    daily_word_goal: Optional[int] = Field(default=None, ge=0, le=100_000)
+    deadline: Optional[date] = None
+    clear_deadline: bool = False
 
 
 class SermonBookCreate(BaseModel):
@@ -94,6 +110,7 @@ async def create_project_from_sermons(
             preferred_translation=profile.preferred_translation,
             guardrails=profile.theological_guardrails,
             sermons=sermons,
+            pack=pack_for(profile),
         )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -101,7 +118,7 @@ async def create_project_from_sermons(
     project = Project(
         user_id=current_user.id,
         title=body.title,
-        genre="teaching",
+        genre="teaching" if pack_for(profile).uses_scripture else profile.theological_lens,
         theme=plan["theme"] or f"A book for {body.target_reader}".strip(),
         target_chapters=len(plan["chapters"]),
         source_sermon_ids=requested_ids,
@@ -151,6 +168,10 @@ async def get_project(project_id: str, current_user: User = Depends(get_current_
     return {
         "id": project.id, "title": project.title, "genre": project.genre,
         "theme": project.theme, "status": project.status, "target_chapters": project.target_chapters,
+        "target_audience": project.target_audience, "style_rules": project.style_rules or [],
+        "style_notes": project.style_notes,
+        "target_word_count": project.target_word_count, "daily_word_goal": project.daily_word_goal,
+        "deadline": project.deadline,
         "source_sermons": source_sermons,
         "chapters": [{"id": c.id, "title": c.title, "chapter_number": c.chapter_number,
                       "status": c.status, "word_count": c.word_count, "position": c.position,
@@ -161,8 +182,29 @@ async def get_project(project_id: str, current_user: User = Depends(get_current_
 @router.put("/projects/{project_id}")
 async def update_project(project_id: str, body: ProjectUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     project = await get_owned_project(project_id, current_user.id, db)
+    updates = body.model_dump(exclude_none=True)
 
-    for k, v in body.model_dump(exclude_none=True).items():
+    if updates.pop("clear_deadline", False):
+        updates["deadline"] = None
+    for goal in ("target_word_count", "daily_word_goal"):
+        if updates.get(goal) == 0:
+            updates[goal] = None
+    if "style_rules" in updates:
+        updates["style_rules"] = [r.strip()[:300] for r in updates["style_rules"] if r.strip()]
+    for field in ("target_audience", "style_notes"):
+        if field in updates:
+            updates[field] = updates[field].strip() or None
+    if "source_sermon_ids" in updates:
+        requested = list(dict.fromkeys(updates["source_sermon_ids"]))
+        if requested:
+            owned = (await db.execute(
+                select(Sermon.id).where(Sermon.id.in_(requested), Sermon.user_id == current_user.id)
+            )).scalars().all()
+            if len(owned) != len(requested):
+                raise HTTPException(status_code=400, detail="Link only sources from your own library")
+        updates["source_sermon_ids"] = requested
+
+    for k, v in updates.items():
         setattr(project, k, v)
     await db.commit()
     return {"updated": True}
@@ -186,15 +228,26 @@ class ChapterCreate(BaseModel):
     testimony_ids: Optional[List[str]] = []
 
 
+class SceneItem(BaseModel):
+    """One planned scene (fiction) or section (non-fiction) of a chapter."""
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=2_000)
+    pov: str = Field(default="", max_length=120)
+    setting: str = Field(default="", max_length=200)
+
+
 class ChapterUpdate(BaseModel):
-    title: Optional[str] = None
-    intent: Optional[str] = None
-    key_points: Optional[List[str]] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    intent: Optional[str] = Field(default=None, max_length=4_000)
+    key_points: Optional[List[str]] = Field(default=None, max_length=30)
+    # Ordered scene/section plan; [] clears it.
+    scenes: Optional[List[SceneItem]] = Field(default=None, max_length=40)
     anchor_scriptures: Optional[List[str]] = None
     testimony_ids: Optional[List[str]] = None
     content: Optional[str] = None
-    status: Optional[str] = None
-    word_count: Optional[int] = None
+    # Stage: draft (Outline) | in_progress (Drafted) | revised | complete (Done)
+    status: Optional[Literal["draft", "in_progress", "revised", "complete"]] = None
+    word_count: Optional[int] = Field(default=None, ge=0, le=1_000_000)
     trigger_indexing: Optional[bool] = False
 
 
@@ -278,7 +331,7 @@ async def reorder_chapters(project_id: str, body: ReorderRequest, current_user: 
 
 
 @router.put("/projects/{project_id}/chapters/{chapter_id}")
-async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     await get_owned_project(project_id, current_user.id, db)
     chapter = await get_owned_chapter(
         chapter_id,
@@ -286,6 +339,18 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
         db,
         project_id=project_id,
     )
+
+    # Keep the outgoing draft in history before it's overwritten. Autosaves
+    # are throttled; explicit saves (trigger_indexing) always keep a copy.
+    if body.content is not None and body.content != chapter.content:
+        if body.trigger_indexing:
+            await snapshot_chapter(db, chapter, "manual")
+        else:
+            await snapshot_chapter(db, chapter, "autosave", min_interval=AUTOSAVE_INTERVAL)
+
+    # Log how much the manuscript grew or shrank today (goals, pace, streaks).
+    if body.word_count is not None:
+        await record_words(db, project_id, current_user.id, body.word_count - (chapter.word_count or 0))
 
     update_data = body.model_dump(exclude_none=True)
     update_data.pop("trigger_indexing", None)
@@ -297,11 +362,71 @@ async def update_chapter(project_id: str, chapter_id: str, body: ChapterUpdate, 
     # Schedule summary generation + companion-chat re-indexing if content
     # was updated AND trigger_indexing was explicitly requested.
     if body.content and body.trigger_indexing:
-        from app.workers.tasks import generate_chapter_summary_task, index_chapter_task
-        fire_background_job(background_tasks, generate_chapter_summary_task, chapter_id, job_name="generate_chapter_summary")
-        fire_background_job(background_tasks, index_chapter_task, chapter_id, job_name="index_chapter")
+        await _queue_chapter_indexing(db, chapter_id)
 
     return {"updated": True}
+
+
+async def _queue_chapter_indexing(db: AsyncSession, chapter_id: str) -> None:
+    """Durably queue the chapter summary + re-index (see app/services/jobs.py)."""
+    await enqueue_job(db, "generate_chapter_summary", chapter_id=chapter_id)
+    await enqueue_job(db, "index_chapter", chapter_id=chapter_id)
+    await db.commit()
+    wake_runner()
+
+
+# ── Chapter draft history ─────────────────────
+
+def _serialize_version(v: ChapterVersion, *, with_content: bool = False) -> dict:
+    data = {"id": v.id, "reason": v.reason, "word_count": v.word_count, "created_at": v.created_at}
+    if with_content:
+        data["content"] = v.content
+    return data
+
+
+async def _get_owned_version(version_id: str, chapter: Chapter, db: AsyncSession) -> ChapterVersion:
+    version = (await db.execute(
+        select(ChapterVersion).where(
+            ChapterVersion.id == version_id,
+            ChapterVersion.chapter_id == chapter.id,
+            ChapterVersion.user_id == chapter.user_id,
+        )
+    )).scalar_one_or_none()
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return version
+
+
+@router.get("/projects/{project_id}/chapters/{chapter_id}/versions")
+async def list_chapter_versions(project_id: str, chapter_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    chapter = await get_owned_chapter(chapter_id, current_user.id, db, project_id=project_id)
+    result = await db.execute(
+        select(ChapterVersion)
+        .where(ChapterVersion.chapter_id == chapter.id, ChapterVersion.user_id == current_user.id)
+        .order_by(ChapterVersion.created_at.desc())
+    )
+    return [_serialize_version(v) for v in result.scalars().all()]
+
+
+@router.get("/projects/{project_id}/chapters/{chapter_id}/versions/{version_id}")
+async def get_chapter_version(project_id: str, chapter_id: str, version_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    chapter = await get_owned_chapter(chapter_id, current_user.id, db, project_id=project_id)
+    return _serialize_version(await _get_owned_version(version_id, chapter, db), with_content=True)
+
+
+@router.post("/projects/{project_id}/chapters/{chapter_id}/versions/{version_id}/restore")
+async def restore_chapter_version(project_id: str, chapter_id: str, version_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    chapter = await get_owned_chapter(chapter_id, current_user.id, db, project_id=project_id)
+    version = await _get_owned_version(version_id, chapter, db)
+
+    # The current draft becomes a version too, so the restore can be undone.
+    await snapshot_chapter(db, chapter, "before_restore")
+    chapter.content = version.content
+    chapter.word_count = version.word_count or 0
+    await db.commit()
+
+    await _queue_chapter_indexing(db, chapter.id)
+    return {"content": chapter.content, "word_count": chapter.word_count}
 
 
 @router.delete("/projects/{project_id}/chapters/{chapter_id}", status_code=204)
@@ -312,6 +437,14 @@ async def delete_chapter(project_id: str, chapter_id: str, current_user: User = 
         current_user.id,
         db,
         project_id=project_id,
+    )
+    # Chapter chunks reference the chapter only by source_id (no FK), so
+    # remove them explicitly or Companion Chat keeps citing a deleted chapter.
+    await db.execute(
+        delete(DocumentEmbedding).where(
+            DocumentEmbedding.doc_type == "chapter",
+            DocumentEmbedding.source_id == chapter_id,
+        )
     )
     await db.delete(chapter)
     await db.commit()
@@ -332,7 +465,6 @@ async def companion_chat_history(
     db: AsyncSession = Depends(get_db),
 ):
     await get_owned_project(project_id, current_user.id, db)
-    await consume_user_quota(db, current_user.id, "ai_request", settings.AI_DAILY_REQUEST_LIMIT)
 
     messages = await get_history(project_id, db)
     return [
@@ -353,6 +485,7 @@ async def companion_chat(
     db: AsyncSession = Depends(get_db),
 ):
     await get_owned_project(project_id, current_user.id, db)
+    await consume_user_quota(db, current_user.id, "ai_request", settings.AI_DAILY_REQUEST_LIMIT)
 
     history_msgs = await get_history(project_id, db)
     history = [{"role": m.role, "content": m.content} for m in history_msgs]
@@ -362,19 +495,24 @@ async def companion_chat(
     async def stream():
         buffer = []
         cited_ids: List[str] = []
-        async for chunk in companion_chat_stream(project_id, body.message, history, db):
-            if chunk.startswith("\n\n[CITED:"):
-                cited_str = chunk.replace("\n\n[CITED:", "").rstrip("]")
-                cited_ids[:] = [c for c in cited_str.split(",") if c]
-            else:
-                buffer.append(chunk)
-                yield f"data: {json.dumps({'text': chunk})}\n\n"
+        # Own session: the request's is closed before the response body streams.
+        async with AsyncSessionLocal() as sdb:
+            try:
+                async for chunk in companion_chat_stream(project_id, body.message, history, sdb):
+                    if chunk.startswith("\n\n[CITED:"):
+                        cited_str = chunk.replace("\n\n[CITED:", "").rstrip("]")
+                        cited_ids[:] = [c for c in cited_str.split(",") if c]
+                    else:
+                        buffer.append(chunk)
+                        yield sse_text(chunk)
+            except Exception as exc:
+                yield sse_error(exc, "companion_chat")
 
-        full_answer = "".join(buffer)
-        if full_answer.strip():
-            await save_message(project_id, current_user.id, "assistant", full_answer, db, referenced_chapter_ids=cited_ids)
+            full_answer = "".join(buffer)
+            if full_answer.strip():
+                await save_message(project_id, current_user.id, "assistant", full_answer, sdb, referenced_chapter_ids=cited_ids)
 
-        yield f"data: {json.dumps({'cited_chapter_ids': cited_ids})}\n\n"
-        yield "data: [DONE]\n\n"
+        yield sse_event({"cited_chapter_ids": cited_ids})
+        yield SSE_DONE
 
     return StreamingResponse(stream(), media_type="text/event-stream")

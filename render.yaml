@@ -45,12 +45,16 @@ services:
         value: rotate                    # Ollama -> Groq -> Anthropic failover; "anthropic"/"groq" pins to one
       - key: OLLAMA_ENABLED
         value: "false"                   # no *local* Ollama daemon reachable from Render — skip that path
+      - key: TRUSTED_PROXY_HOPS
+        value: "2"                       # browser -> Vercel rewrite -> Render proxy: the real client IP is the
+                                         # 2nd X-Forwarded-For entry from the right. Requests sent straight to the
+                                         # onrender.com URL can still spoof it; per-account limits still apply.
       - key: GROQ_MODEL
         value: openai/gpt-oss-120b
       - key: OLLAMA_CLOUD_MODEL
         value: gpt-oss:120b
       - key: ANTHROPIC_MODEL
-        value: claude-sonnet-4-20250514
+        value: claude-opus-5-5
       # ── Secrets / environment-specific: set these in the dashboard ────────
       - key: DATABASE_URL
         sync: false                      # Supabase SESSION POOLER URL (IPv4).

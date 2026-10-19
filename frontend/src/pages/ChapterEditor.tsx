@@ -9,7 +9,14 @@ import {
   Send, Loader2, Download, Save, X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { api, streamSSE } from '@/lib/api'
+import { api, getCsrfToken, streamSSE } from '@/lib/api'
+import { usePack } from '@/stores/authStore'
+import HistoryPanel from '@/components/editor/HistoryPanel'
+import ChapterNotesPanel from '@/components/editor/ChapterNotesPanel'
+import ConsistencyCheck from '@/components/editor/ConsistencyCheck'
+import PlanPanel, { type Scene } from '@/components/editor/PlanPanel'
+import QuoteCheck from '@/components/editor/QuoteCheck'
+import { STAGES, stageOf, type Stage } from '@/lib/stages'
 
 interface Chapter {
   id: string
@@ -22,6 +29,7 @@ interface Chapter {
   content?: string
   status: string
   voice_match_score?: number
+  scenes?: Scene[] | null
 }
 
 interface Testimony {
@@ -43,11 +51,21 @@ interface VoiceCheck {
   phrase_matches?: string[]
   phrase_usage_rate?: number
   scripture_matches?: string[]
+  fiction_signals?: { pov: string; tense: string; dialogue_ratio: number } | null
 }
 
-type SidebarTab = 'actions' | 'chat'
+type SidebarTab = 'actions' | 'chat' | 'plan' | 'notes' | 'history'
+
+const SIDEBAR_TABS: { id: SidebarTab; label: string }[] = [
+  { id: 'actions', label: 'Actions' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'plan', label: 'Plan' },
+  { id: 'notes', label: 'Notes' },
+  { id: 'history', label: 'History' },
+]
 
 export default function ChapterEditor() {
+  const pack = usePack()
   const { id: projectId, chapterId } = useParams<{ id: string; chapterId: string }>()
   const [chapter, setChapter] = useState<Chapter | null>(null)
   const [loading, setLoading] = useState(true)
@@ -58,6 +76,7 @@ export default function ChapterEditor() {
   const [mobileAiOpen, setMobileAiOpen] = useState(false)
   const [scriptureSuggestions, setScriptureSuggestions] = useState<any[]>([])
   const [tab, setTab] = useState<SidebarTab>('actions')
+  const [historyKey, setHistoryKey] = useState(0)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatStreaming, setChatStreaming] = useState(false)
@@ -124,13 +143,16 @@ export default function ChapterEditor() {
         const content = editor.getHTML()
         if (content !== lastIndexedHtmlRef.current) {
           const wordCount = editor.storage.characterCount.words()
-          const token = localStorage.getItem('scribe_token')
           const url = api.defaults.baseURL + `/projects/${projectId}/chapters/${chapterId}`
+          const csrf = getCsrfToken()
+          // keepalive lets this finish after the page goes away. Auth is the
+          // session cookie + CSRF header, same as every other write.
           fetch(url, {
             method: 'PUT',
+            credentials: 'include',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: token ? `Bearer ${token}` : '',
+              ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
             },
             body: JSON.stringify({
               content,
@@ -159,6 +181,19 @@ export default function ChapterEditor() {
     }
   }
 
+  const handleStageChange = async (status: Stage) => {
+    if (!chapter) return
+    const previous = chapter.status
+    setChapter({ ...chapter, status })
+    try {
+      await api.put(`/projects/${projectId}/chapters/${chapterId}`, { status })
+      toast.success(`Marked ${stageOf(status).label}`)
+    } catch {
+      setChapter((c) => (c ? { ...c, status: previous } : c))
+      toast.error('Failed to update stage')
+    }
+  }
+
   const manualSave = async () => {
     if (!editor) return
     setSaving(true)
@@ -171,6 +206,7 @@ export default function ChapterEditor() {
         trigger_indexing: true,
       })
       lastIndexedHtmlRef.current = content
+      setHistoryKey((k) => k + 1)
       toast.success('Saved')
     } catch {
       toast.error('Save failed')
@@ -182,6 +218,7 @@ export default function ChapterEditor() {
   // ── Generate full chapter ──────────────────
   const handleGenerateChapter = async () => {
     if (!editor) return
+    if (!editor.isEmpty && !window.confirm('Replace this draft with a new AI draft? Your current draft is kept in History.')) return
     setGenerating(true)
     editor.commands.clearContent()
 
@@ -204,6 +241,7 @@ export default function ChapterEditor() {
             trigger_indexing: true,
           }).catch(() => {})
           lastIndexedHtmlRef.current = content
+          setHistoryKey((k) => k + 1)
           toast.success('Chapter draft generated')
         },
         (err) => {
@@ -285,7 +323,8 @@ export default function ChapterEditor() {
         chapter_id: chapterId,
         text: editor.getText(),
       })
-      setVoiceCheck(res.data)
+      // The API calls the headline number voice_match_score; the panel reads `score`.
+      setVoiceCheck({ ...res.data, score: res.data.voice_match_score })
       toast.success(`Voice match: ${Math.round(res.data.voice_match_score * 100)}%`)
     } catch {
       toast.error('Voice check failed')
@@ -341,7 +380,10 @@ export default function ChapterEditor() {
           })
         },
         () => setChatStreaming(false),
-        () => setChatStreaming(false)
+        (err) => {
+          setChatStreaming(false)
+          toast.error(err)
+        }
       )
     } catch {
       setChatStreaming(false)
@@ -378,7 +420,17 @@ export default function ChapterEditor() {
 
           <div className="flex items-start justify-between mb-6">
             <div>
-              <span className="text-xs text-ink0 font-mono">Chapter {chapter.chapter_number}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-ink0 font-mono">Chapter {chapter.chapter_number}</span>
+                <select
+                  value={stageOf(chapter.status).id}
+                  onChange={(e) => handleStageChange(e.target.value as Stage)}
+                  className={`status-tag cursor-pointer ${stageOf(chapter.status).className}`}
+                  aria-label="Chapter stage"
+                >
+                  {STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+              </div>
               <h1 className="font-display text-display-md font-semibold">{chapter.title}</h1>
               {chapter.intent && <p className="text-study-300 mt-1 text-sm">{chapter.intent}</p>}
             </div>
@@ -454,21 +506,40 @@ export default function ChapterEditor() {
 
         {/* Tabs */}
         <div className="flex border-b border-paper-300">
-          <button
-            onClick={() => setTab('actions')}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === 'actions' ? 'text-seal border-b-2 border-seal' : 'text-study-300 hover:text-study-400'}`}
-          >
-            Quick Actions
-          </button>
-          <button
-            onClick={() => setTab('chat')}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === 'chat' ? 'text-seal border-b-2 border-seal' : 'text-study-300 hover:text-study-400'}`}
-          >
-            Chat
-          </button>
+          {SIDEBAR_TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === id ? 'text-seal border-b-2 border-seal' : 'text-study-300 hover:text-study-400'}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        {tab === 'actions' ? (
+        {tab === 'history' ? (
+          <HistoryPanel
+            projectId={projectId!}
+            chapterId={chapterId!}
+            refreshKey={historyKey}
+            onRestored={(content) => {
+              editor?.commands.setContent(content)
+              lastIndexedHtmlRef.current = content
+            }}
+          />
+        ) : tab === 'plan' ? (
+          <PlanPanel
+            key={chapter?.id}
+            projectId={projectId!}
+            chapterId={chapterId!}
+            intent={chapter?.intent}
+            keyPoints={chapter?.key_points}
+            scenes={chapter?.scenes}
+            onSaved={(update) => setChapter((c) => (c ? { ...c, ...update } : c))}
+          />
+        ) : tab === 'notes' ? (
+          <ChapterNotesPanel projectId={projectId!} chapterId={chapterId!} />
+        ) : tab === 'actions' ? (
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {/* Continue writing */}
             <button
@@ -509,10 +580,37 @@ export default function ChapterEditor() {
                   <p><span className="font-medium text-seal-400">Cadence:</span> {voiceCheck.cadence_delta === undefined ? 'Run a fresh check to compare cadence.' : `${voiceCheck.cadence_delta >= 0 ? 'Slightly more flowing' : 'Slightly more punchy'} than your baseline`}</p>
                   {voiceCheck.phrase_matches && voiceCheck.phrase_matches.length > 0 && <p><span className="font-medium text-seal-400">Voice signals found:</span> {voiceCheck.phrase_matches.join(' · ')}</p>}
                   {voiceCheck.scripture_matches && voiceCheck.scripture_matches.length > 0 && <p><span className="font-medium text-seal-400">Anchor scriptures used:</span> {voiceCheck.scripture_matches.join(' · ')}</p>}
-                  {(!voiceCheck.phrase_matches || voiceCheck.phrase_matches.length === 0) && (!voiceCheck.scripture_matches || voiceCheck.scripture_matches.length === 0) && <p>Check the chapter after adding more of your own language or scripture anchors to see evidence here.</p>}
+                  {voiceCheck.fiction_signals && (
+                    <p title="Approximate — based on word counts in the narration">
+                      <span className="font-medium text-seal-400">Narration (approx.):</span>{' '}
+                      {voiceCheck.fiction_signals.pov} · {voiceCheck.fiction_signals.tense} tense · {Math.round(voiceCheck.fiction_signals.dialogue_ratio * 100)}% dialogue
+                    </p>
+                  )}
+                  {(!voiceCheck.phrase_matches || voiceCheck.phrase_matches.length === 0) && (!voiceCheck.scripture_matches || voiceCheck.scripture_matches.length === 0) && <p>Check the chapter after adding more of your own language{pack.usesScripture ? ' or scripture anchors' : ''} to see evidence here.</p>}
                 </div>
               </div>
             )}
+
+            {/* Consistency against the book bible */}
+            {pack.verifiesQuotes && (
+              <QuoteCheck
+                projectId={projectId!}
+                chapterId={chapterId!}
+                disabled={!!actionLoading}
+                beforeCheck={async () => {
+                  if (editor) await autoSave(editor.getHTML(), editor.storage.characterCount.words())
+                }}
+              />
+            )}
+
+            <ConsistencyCheck
+              projectId={projectId!}
+              chapterId={chapterId!}
+              disabled={!!actionLoading}
+              beforeCheck={async () => {
+                if (editor) await autoSave(editor.getHTML(), editor.storage.characterCount.words())
+              }}
+            />
 
             {/* Weave story */}
             <div className="card p-3">
@@ -520,12 +618,12 @@ export default function ChapterEditor() {
                 <ScrollText size={18} className="text-seal flex-shrink-0 mt-0.5" />
                 <div>
                   <h3 className="font-medium text-sm">Weave In My Story</h3>
-                  <p className="text-xs text-study-300">Pull from your testimony vault.</p>
+                  <p className="text-xs text-study-300">Pull from your {pack.story.vault}.</p>
                 </div>
               </div>
               {testimonies.length === 0 ? (
                 <p className="text-xs text-ink0 ml-8">
-                  No testimonies yet — <Link to="/testimonies" className="text-seal underline">add one</Link>
+                  No {pack.story.plural} yet — <Link to="/testimonies" className="text-seal underline">add one</Link>
                 </p>
               ) : (
                 <div className="ml-8 space-y-1.5">
@@ -544,7 +642,8 @@ export default function ChapterEditor() {
               {actionLoading === 'weave' && <Loader2 size={14} className="animate-spin text-seal ml-8 mt-2" />}
             </div>
 
-            {/* Scripture suggestions */}
+            {/* Scripture suggestions — only for packs with a verified scripture index */}
+            {pack.usesScripture && (<>
             <button
               onClick={handleScriptureSuggest}
               disabled={!!actionLoading}
@@ -574,13 +673,14 @@ export default function ChapterEditor() {
                 ))}
               </div>
             )}
+            </>)}
           </div>
         ) : (
           <>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {chatMessages.length === 0 && (
                 <p className="text-sm text-ink0 italic">
-                  Ask The Scribe anything — "Make this more prophetic", "What's missing from this chapter?",
+                  Ask The Scribe anything — "Make this more vivid", "What's missing from this chapter?",
                   "Suggest a stronger opening hook"...
                 </p>
               )}

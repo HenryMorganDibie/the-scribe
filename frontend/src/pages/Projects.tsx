@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Plus, BookOpen, X, Trash2, Pencil, Sparkles, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
+import { cap } from '@/lib/packs'
+import { usePack } from '@/stores/authStore'
 
 interface Project {
   id: string
@@ -20,9 +22,10 @@ interface Sermon {
   word_count: number
 }
 
-const GENRES = ['teaching', 'devotional', 'prophetic', 'memoir']
 
 export default function Projects() {
+  const pack = usePack()
+  const sources = pack.source.plural
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -72,7 +75,7 @@ export default function Projects() {
   const [bookReader, setBookReader] = useState('')
   const [buildingBook, setBuildingBook] = useState(false)
   const [title, setTitle] = useState('')
-  const [genre, setGenre] = useState('teaching')
+  const [genre, setGenre] = useState(pack.projectGenres[0])
   const [theme, setTheme] = useState('')
   const [targetChapters, setTargetChapters] = useState(10)
   const navigate = useNavigate()
@@ -101,7 +104,7 @@ export default function Projects() {
     setBuildingBook(true)
     try {
       const res = await api.post('/projects/from-sermons', { title, target_reader: bookReader, sermon_ids: selectedSermonIds, target_chapters: targetChapters })
-      toast.success(`Book blueprint created from ${selectedSermonIds.length} sermon${selectedSermonIds.length === 1 ? '' : 's'}`)
+      toast.success(`Book blueprint created from ${selectedSermonIds.length} ${selectedSermonIds.length === 1 ? pack.source.singular : sources}`)
       navigate(`/projects/${res.data.id}`)
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Unable to build the book blueprint')
@@ -120,7 +123,7 @@ export default function Projects() {
         <div className="flex gap-2">
           <button onClick={() => { setShowBookBuilder(!showBookBuilder); setShowForm(false) }} className="btn-primary flex items-center gap-2">
             {showBookBuilder ? <X size={16} /> : <Sparkles size={16} />}
-            {showBookBuilder ? 'Cancel' : 'Build from Sermons'}
+            {showBookBuilder ? 'Cancel' : `Build from ${cap(sources)}`}
           </button>
           <button onClick={() => { setShowForm(!showForm); setShowBookBuilder(false) }} className="btn-secondary flex items-center gap-2">
             {showForm ? <X size={16} /> : <Plus size={16} />}
@@ -132,20 +135,20 @@ export default function Projects() {
       {showBookBuilder && (
         <form onSubmit={handleBuildBook} className="card p-6 mb-6 space-y-5 animate-fade-in-up border-seal-200">
           <div>
-            <div className="flex items-center gap-2 mb-1"><Sparkles size={18} className="text-seal" /><h2 className="font-display text-lg font-semibold">Build a book from your sermons</h2></div>
-            <p className="text-sm text-study-300">Select completed sermons. The Scribe will create a chapter blueprint grounded in those messages and your voice profile.</p>
+            <div className="flex items-center gap-2 mb-1"><Sparkles size={18} className="text-seal" /><h2 className="font-display text-lg font-semibold">Build a book from your {sources}</h2></div>
+            <p className="text-sm text-study-300">Select completed {sources}. The Scribe will create a chapter blueprint grounded in that material and your voice profile.</p>
           </div>
           <div>
             <label className="block text-sm text-study-400 mb-1.5">Book title</label>
-            <input required value={title} onChange={(e) => setTitle(e.target.value)} className="input-field w-full" placeholder="Called: Finding Your Voice in the Wilderness" />
+            <input required value={title} onChange={(e) => setTitle(e.target.value)} className="input-field w-full" placeholder={pack.usesScripture ? 'Called: Finding Your Voice in the Wilderness' : 'The Quiet Hours: Notes on Doing Deep Work'} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div><label className="block text-sm text-study-400 mb-1.5">Target reader</label><input value={bookReader} onChange={(e) => setBookReader(e.target.value)} className="input-field w-full" placeholder="Believers discerning their calling" /></div>
+            <div><label className="block text-sm text-study-400 mb-1.5">Target reader</label><input value={bookReader} onChange={(e) => setBookReader(e.target.value)} className="input-field w-full" placeholder={pack.usesScripture ? 'Believers discerning their calling' : 'First-time managers finding their footing'} /></div>
             <div><label className="block text-sm text-study-400 mb-1.5">Target chapters</label><input type="number" min={3} max={20} value={targetChapters} onChange={(e) => setTargetChapters(parseInt(e.target.value, 10) || 3)} className="input-field w-full" /></div>
           </div>
           <div>
-            <label className="block text-sm text-study-400 mb-2">Source sermons</label>
-            {sermons.length === 0 ? <p className="text-sm text-study-300">Upload and process a sermon first, then return here to build your book.</p> : (
+            <label className="block text-sm text-study-400 mb-2">Source {sources}</label>
+            {sermons.length === 0 ? <p className="text-sm text-study-300">Upload and process a {pack.source.singular} first, then return here to build your book.</p> : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto">
                 {sermons.map((sermon) => {
                   const selected = selectedSermonIds.includes(sermon.id)
@@ -166,13 +169,13 @@ export default function Projects() {
         <form onSubmit={handleSubmit} className="card p-6 mb-6 space-y-4 animate-fade-in-up">
           <div>
             <label className="block text-sm text-study-400 mb-1.5">Title</label>
-            <input required value={title} onChange={(e) => setTitle(e.target.value)} className="input-field w-full" placeholder="Called: Finding Your Voice in the Wilderness" />
+            <input required value={title} onChange={(e) => setTitle(e.target.value)} className="input-field w-full" placeholder={pack.usesScripture ? 'Called: Finding Your Voice in the Wilderness' : 'The Quiet Hours: Notes on Doing Deep Work'} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-study-400 mb-1.5">Genre</label>
               <select value={genre} onChange={(e) => setGenre(e.target.value)} className="input-field w-full capitalize">
-                {GENRES.map((g) => <option key={g} value={g}>{g}</option>)}
+                {pack.projectGenres.map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
             <div>

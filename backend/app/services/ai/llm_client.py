@@ -23,6 +23,7 @@ LLM_PROVIDER controls the mode:
     when you deliberately want guaranteed-consistent output (e.g. final
     manuscript export) or need to isolate one provider while debugging.
 """
+import asyncio
 from typing import AsyncIterator, Awaitable, Callable, Optional
 from dataclasses import dataclass
 
@@ -48,20 +49,46 @@ class LLMResult:
 # log attribution) and an async generator `.stream(...)` that sets
 # `.last_usage` as a side effect once the stream completes.
 
+class LLMRefusal(RuntimeError):
+    """The model declined the request (stop_reason "refusal"), even after server-side fallback."""
+
+
 class AnthropicProvider:
+    """Claude via the Anthropic SDK (anthropic 1.x).
+
+    - Thinking is always on for current models and counts toward max_tokens,
+      so callers' reply budgets get ANTHROPIC_THINKING_HEADROOM_TOKENS added
+      (unused tokens aren't billed). Effort is set explicitly.
+    - No text arrives until thinking finishes, so the router waits longer
+      for this provider's first chunk (first_chunk_timeout).
+    - Safety-classifier declines are retried server-side on Anthropic's
+      recommended fallback model (fallbacks="default"); a decline that still
+      comes back raises LLMRefusal so the router can try another provider.
+    """
+
+    FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
     def __init__(self, api_key: str, model: str):
         from anthropic import AsyncAnthropic
         self.id = "anthropic"
         self.model = model
         self.last_usage: Optional[LLMUsage] = None
+        self.first_chunk_timeout = settings.ANTHROPIC_FIRST_CHUNK_TIMEOUT_SECONDS
         self._client = AsyncAnthropic(api_key=api_key)
 
     async def stream(self, messages: list[dict], system: Optional[str], max_tokens: int) -> AsyncIterator[str]:
-        kwargs = {"model": self.model, "max_tokens": max_tokens, "messages": messages}
+        kwargs = {
+            "model": self.model,
+            "max_tokens": max_tokens + settings.ANTHROPIC_THINKING_HEADROOM_TOKENS,
+            "messages": messages,
+            "output_config": {"effort": settings.ANTHROPIC_EFFORT},
+            "betas": [self.FALLBACK_BETA],
+            "fallbacks": "default",
+        }
         if system:
             kwargs["system"] = system
 
-        async with self._client.messages.stream(**kwargs) as stream:
+        async with self._client.beta.messages.stream(**kwargs) as stream:
             async for text in stream.text_stream:
                 yield text
             final = await stream.get_final_message()
@@ -69,6 +96,9 @@ class AnthropicProvider:
                 input_tokens=final.usage.input_tokens,
                 output_tokens=final.usage.output_tokens,
             )
+            if final.stop_reason == "refusal":
+                category = getattr(final.stop_details, "category", None) if final.stop_details else None
+                raise LLMRefusal(f"Claude declined the request (category: {category or 'unspecified'})")
 
 
 class GroqProvider:
@@ -163,7 +193,8 @@ class OllamaProvider:
 
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
 
-        async with httpx.AsyncClient(timeout=None) as client:
+        # Bounded waits: connecting, and the gap between streamed lines.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(settings.LLM_STREAM_READ_TIMEOUT_SECONDS, connect=10.0)) as client:
             async with client.stream("POST", f"{self._base_url}/api/chat", json=payload, headers=headers) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
@@ -185,15 +216,23 @@ class OllamaProvider:
 ProviderFactory = Callable[[], Awaitable[Optional[object]]]
 
 
+async def _close_quietly(gen) -> None:
+    try:
+        await gen.aclose()
+    except Exception:
+        pass
+
+
 class ProviderRouter:
     """Tries candidates in order, skipping anything in cooldown, and fails
     over silently on error. Commits to a candidate only after its first
     chunk arrives successfully, so a mid-request failure never produces
     output stitched together from two different providers."""
 
-    def __init__(self, candidates: list[ProviderFactory], health: ProviderHealthTracker):
+    def __init__(self, candidates: list[ProviderFactory], health: ProviderHealthTracker, first_chunk_timeout: Optional[float] = None):
         self._candidates = candidates
         self._health = health
+        self._first_chunk_timeout = first_chunk_timeout or settings.LLM_FIRST_CHUNK_TIMEOUT_SECONDS
         self.last_provider: Optional[object] = None
 
     async def stream(self, messages: list[dict], system: Optional[str], max_tokens: int) -> AsyncIterator[str]:
@@ -208,11 +247,24 @@ class ProviderRouter:
 
             gen = provider.stream(messages, system, max_tokens)
             try:
-                first_chunk = await gen.__anext__()
+                # A provider that accepts the request but never answers would
+                # otherwise hang the whole request instead of failing over.
+                # Providers that think before answering may wait longer for their first chunk.
+                timeout = getattr(provider, "first_chunk_timeout", None) or self._first_chunk_timeout
+                first_chunk = await asyncio.wait_for(gen.__anext__(), timeout=timeout)
             except StopAsyncIteration:
                 self._health.record_success(provider.id)
                 self.last_provider = provider
                 return
+            except asyncio.TimeoutError:
+                self._health.record_failure(provider.id)
+                errors.append(f"{provider.id}: no response within {timeout:g}s")
+                await _close_quietly(gen)
+                continue
+            except LLMRefusal as exc:
+                # A content decline isn't an outage: try the next provider, no cooldown.
+                errors.append(f"{provider.id}: {exc}")
+                continue
             except Exception as exc:
                 self._health.record_failure(provider.id, rate_limited=looks_rate_limited(exc))
                 errors.append(f"{provider.id}: {exc}")
@@ -361,7 +413,7 @@ def get_llm_client() -> LLMClient:
 # Cost tables (USD per token) — used for generation_logs.cost_usd. Looked up
 # by the provider id's prefix before the first ":" (e.g. "groq:openai/gpt-oss-120b" -> "groq").
 COST_PER_TOKEN = {
-    "anthropic": {"input": 0.000003, "output": 0.000015},   # claude-sonnet-4
+    "anthropic": {"input": 0.000004, "output": 0.000020},   # claude-opus-5-5 ($4 / $20 per MTok)
     # GPT-OSS 120B on Groq: $0.15 input / $0.60 output per million tokens.
     "groq": {"input": 0.00000015, "output": 0.00000060},
     "ollama": {"input": 0.0, "output": 0.0},  # local daemon (incl. "-cloud" proxy) — free

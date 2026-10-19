@@ -4,12 +4,12 @@ Upgraded schema includes: pgvector embeddings, voice evolution timeline,
 scripture index, voice drift scoring, expanded generation logs.
 """
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from sqlalchemy import (
-    String, Text, Boolean, Integer, Float, DateTime,
-    ForeignKey, JSON, ARRAY, Index
+    String, Text, Boolean, Integer, Float, Date, DateTime,
+    ForeignKey, JSON, ARRAY, Index, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -88,6 +88,10 @@ class VoiceProfile(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), unique=True)
 
+    # Genre pack (see app/services/packs.py). The interview columns below
+    # keep their original names; each pack labels them for its genre.
+    pack: Mapped[str] = mapped_column(String, nullable=False, default="general", server_default="general")
+
     # Raw interview answers
     ministry_background: Mapped[Optional[str]] = mapped_column(Text)
     theological_lens: Mapped[Optional[str]] = mapped_column(String)  # apostolic|prophetic|spirit-filled|charismatic
@@ -136,7 +140,7 @@ class VoiceVersion(Base):
     # What triggered this version
     trigger: Mapped[str] = mapped_column(String)  # 'onboarding_complete'|'edit_accepted'|'manual_update'
     change_summary: Mapped[Optional[str]] = mapped_column(Text)  # AI-generated summary of what changed
-    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id"), nullable=True)
+    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True)
 
     # Voice quality metrics at this snapshot
     cadence_score: Mapped[Optional[float]] = mapped_column(Float)
@@ -242,13 +246,34 @@ class Project(Base):
     theme: Mapped[Optional[str]] = mapped_column(Text)
     target_chapters: Mapped[int] = mapped_column(Integer, default=10)
     status: Mapped[str] = mapped_column(String, default="active")  # active|complete|archived
+    # Linked source library (sermons table rows). Generation retrieves from
+    # these sources' transcripts when drafting this book's chapters.
     source_sermon_ids: Mapped[Optional[List[str]]] = mapped_column(JSONB)
+
+    # Per-book style. Each field overrides the author's voice profile for
+    # this book only; empty means "inherit".
+    target_audience: Mapped[Optional[str]] = mapped_column(Text)
+    style_rules: Mapped[Optional[List[str]]] = mapped_column(JSONB)
+    style_notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Goals — all optional.
+    target_word_count: Mapped[Optional[int]] = mapped_column(Integer)
+    deadline: Mapped[Optional[date]] = mapped_column(Date)
+    daily_word_goal: Mapped[Optional[int]] = mapped_column(Integer)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="projects")
-    chapters: Mapped[List["Chapter"]] = relationship(back_populates="project", order_by="Chapter.position")
+    # The database cascades chapter deletes (chapters.project_id ON DELETE
+    # CASCADE). passive_deletes stops the ORM from first trying to NULL each
+    # chapter's NOT NULL project_id, which made every project delete fail.
+    chapters: Mapped[List["Chapter"]] = relationship(
+        back_populates="project",
+        order_by="Chapter.position",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 # ─────────────────────────────────────────────
@@ -270,6 +295,8 @@ class Chapter(Base):
     key_points: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text))
     anchor_scriptures: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
     testimony_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
+    # Ordered plan of the chapter's scenes/sections: [{title, summary, pov, setting}]
+    scenes: Mapped[Optional[List[dict]]] = mapped_column(JSONB)
 
     # Content
     content: Mapped[Optional[str]] = mapped_column(Text)  # Rich text (HTML from TipTap)
@@ -284,6 +311,80 @@ class Chapter(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="chapters")
+
+
+# ─────────────────────────────────────────────
+# CHAPTER DRAFT HISTORY
+# Point-in-time copies of a chapter's content: taken periodically while the
+# author writes, and always before AI generation or a restore replaces it.
+# ─────────────────────────────────────────────
+class ChapterVersion(Base):
+    __tablename__ = "chapter_versions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    chapter_id: Mapped[str] = mapped_column(String, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)  # autosave|manual|before_ai|before_restore
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_chapter_versions_chapter_created", "chapter_id", "created_at"),
+    )
+
+
+# ─────────────────────────────────────────────
+# WRITING LOG
+# One row per book per (UTC) day: how much the manuscript grew or shrank.
+# Feeds daily goals, pace, streaks and the writing-history chart.
+# ─────────────────────────────────────────────
+class WritingDay(Base):
+    __tablename__ = "writing_days"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    words_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    words_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "day", name="uq_writing_days_project_day"),
+    )
+
+
+# ─────────────────────────────────────────────
+# BOOK BIBLE
+# Per-book knowledge: characters, places, terms, sources, notes and research.
+# Embedded into document_embeddings (doc_type='book_entry') so generation
+# and Companion Chat retrieve the entries relevant to what's being written.
+# ─────────────────────────────────────────────
+class BookEntry(Base):
+    __tablename__ = "book_entries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Optional: notes/research attached to one chapter rather than the whole book.
+    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True)
+
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # character|place|term|event|source|note|research
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Timeline events only: a display label ("Spring 1998", "Day 3") and a sort position.
+    when_label: Mapped[Optional[str]] = mapped_column(String(120))
+    timeline_order: Mapped[Optional[int]] = mapped_column(Integer)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_book_entries_project_kind", "project_id", "kind"),
+        Index("ix_book_entries_chapter", "chapter_id"),
+    )
 
 
 # ─────────────────────────────────────────────
@@ -324,10 +425,10 @@ class GenerationLog(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
-    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id"), nullable=True)
+    chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True)
 
     action: Mapped[str] = mapped_column(String)  # generate_chapter|continue|weave_story|voice_check|preview|chat
-    model: Mapped[str] = mapped_column(String, default="claude-sonnet-4-20250514")
+    model: Mapped[str] = mapped_column(String, default="unknown")  # provider id that served it
 
     tokens_in: Mapped[Optional[int]] = mapped_column(Integer)
     tokens_out: Mapped[Optional[int]] = mapped_column(Integer)
@@ -369,4 +470,28 @@ class Sermon(Base):
 
     __table_args__ = (
         Index("ix_sermons_user_status", "user_id", "status"),
+    )
+
+
+# ─────────────────────────────────────────────
+# BACKGROUND JOBS
+# Durable queue for post-request work (summaries, indexing, voice DNA).
+# Rows survive restarts; app/services/jobs.py runs and retries them.
+# ─────────────────────────────────────────────
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending|running|done|failed
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    run_after: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    __table_args__ = (
+        Index("ix_jobs_status_run_after", "status", "run_after"),
     )

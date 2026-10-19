@@ -1,11 +1,22 @@
 # The Scribe
 
-An AI writing assistant for Christian authors — apostolic, prophetic, and Spirit-filled
-voices in particular. The Scribe does not write generic devotional copy. It interviews
-an author about their theological lens, recurring phrases, anchor scriptures, cadence,
-and personal testimonies, builds a versioned "voice profile" from that interview, and
-then ghostwrites manuscript chapters in that voice — retrieving the author's own
-material via embeddings rather than stuffing everything into one prompt.
+An AI workspace that helps writers *finish* a book. Each manuscript keeps its own
+chapters, sources, stories and progress, and The Scribe works from all of it: it
+interviews the author (or learns from talks and drafts they already have), builds a
+versioned "voice profile", and drafts chapters in that voice — retrieving the
+author's own material via embeddings rather than stuffing everything into one prompt,
+and remembering what earlier chapters already said.
+
+Genre-specific behaviour comes from **packs** (`backend/app/services/packs.py`,
+`frontend/src/lib/packs.ts`):
+
+- `general` — non-fiction (memoir, business, self-help, academic, history), with quote
+  verification against the book's own sources;
+- `fiction` — novels and short stories, with scene plans, a timeline and POV/tense/dialogue
+  signals;
+- `christian` — the product's original focus: sermons, testimonies and scripture
+  verification against a real verse index.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for where this is heading.
 
 ---
 
@@ -148,7 +159,7 @@ it rotates across providers instead of committing to a single one:
 2. **Groq's free tier** — `GROQ_MODEL` first, then `openai/gpt-oss-120b` →
    `openai/gpt-oss-20b` → `qwen/qwen3.6-27b` as fallbacks if one is
    rate-limited or erroring.
-3. **Anthropic** (`claude-sonnet-4`) — last resort, only reached if every
+3. **Anthropic** (`claude-opus-5-5`) — last resort, only reached if every
    Groq/Ollama candidate above is unavailable, and only tried at all if
    `ANTHROPIC_API_KEY` is set.
 
@@ -167,7 +178,7 @@ To pin to exactly one provider instead (no rotation), set:
 LLM_PROVIDER=anthropic   # or "groq" — disables rotation entirely
 
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-opus-5-5
 
 GROQ_API_KEY=gsk_...
 GROQ_MODEL=openai/gpt-oss-120b

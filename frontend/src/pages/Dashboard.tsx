@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Plus, BookOpen, Feather, ArrowRight, TrendingUp } from 'lucide-react'
 import { api } from '@/lib/api'
-import { useAuthStore } from '@/stores/authStore'
+import { useAuthStore, usePack } from '@/stores/authStore'
+import { cap } from '@/lib/packs'
 import toast from 'react-hot-toast'
 
 interface Project {
@@ -37,6 +38,7 @@ function getGreeting() {
 }
 
 export default function Dashboard() {
+  const pack = usePack()
   const { user } = useAuthStore()
   const [projects, setProjects] = useState<Project[]>([])
   const [profile, setProfile] = useState<VoiceProfileData | null>(null)
@@ -101,7 +103,7 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-4">
               <div>
-                <span className="text-xs text-study-300 uppercase tracking-wide">Theological Lens</span>
+                <span className="text-xs text-study-300 uppercase tracking-wide">{pack.lensLabel}</span>
                 <p className="text-ink font-medium">{profile.theological_lens}</p>
               </div>
 
@@ -123,7 +125,7 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {profile.anchor_scriptures && profile.anchor_scriptures.length > 0 && (
+              {pack.usesScripture && profile.anchor_scriptures && profile.anchor_scriptures.length > 0 && (
                 <div>
                   <span className="text-xs text-study-300 uppercase tracking-wide">Anchor Scriptures</span>
                   <div className="flex flex-wrap gap-2 mt-1.5">
@@ -150,7 +152,7 @@ export default function Dashboard() {
               <Plus size={16} /> New Manuscript
             </Link>
             <Link to="/testimonies" className="btn-secondary w-full flex items-center justify-center gap-2">
-              Add Testimony
+              Add {cap(pack.story.singular)}
             </Link>
             <Link to="/voice-profile" className="btn-secondary w-full flex items-center justify-center gap-2">
               Voice Evolution Timeline

@@ -17,6 +17,8 @@ from sqlalchemy import select, text
 from app.models import Project, Chapter, CompanionChatMessage, VoiceProfile
 from app.services.voice.embeddings import embedding_service
 from app.services.ai.llm_client import get_llm_client
+from app.services.book_bible import book_context
+from app.services.progress import STAGE_LABELS, load_progress, progress_summary_for_prompt
 
 
 async def _build_chapter_manifest(project_id: str, db: AsyncSession) -> str:
@@ -40,8 +42,8 @@ async def _build_chapter_manifest(project_id: str, db: AsyncSession) -> str:
         points = "; ".join((ch.key_points or [])[:4]) or "none specified"
         lines.append(
             f"Chapter {ch.chapter_number}: \"{ch.title}\" "
-            f"[{ch.status}, {ch.word_count} words] — "
-            f"scriptures: {scriptures} — key points: {points}"
+            f"[{STAGE_LABELS.get(ch.status, ch.status)}, {ch.word_count} words] — "
+            f"references: {scriptures} — key points: {points}"
         )
     return "\n".join(lines)
 
@@ -122,24 +124,34 @@ async def companion_chat_stream(
     if profile and profile.voice_summary:
         voice_note = f"\nThe author's voice (for your own tone when answering): {profile.voice_summary[:400]}"
 
+    knowledge = await book_context(db, project, user_message)
+    progress, steps = await load_progress(db, project)
+
     system = f"""You are the Manuscript Companion for "{project.title}" — an AI that has read this \
-entire book-in-progress and helps the author understand their own manuscript.
+entire book-in-progress and helps the author understand their own manuscript — and finish it.
 
 THEME: {project.theme or 'not specified'}
 GENRE: {project.genre or 'not specified'}
+
+PROGRESS:
+{progress_summary_for_prompt(progress, steps)}
 
 CHAPTER MANIFEST (every chapter in this manuscript):
 {manifest}
 
 RELEVANT PASSAGES (retrieved for this specific question):
 {excerpts_text}
+
+{knowledge}
 {voice_note}
 
 You answer questions like:
+- "What should I work on next?" — use PROGRESS and its suggested next steps; be concrete and encouraging.
+- "Is this consistent with what I've established?" — check the passages against the established book facts.
 - "Have I already covered this idea?" — check both the manifest and the passages.
 - "Which chapter discusses X?" — point to specific chapter numbers and titles.
 - "Am I repeating myself?" — compare passages/chapters for overlapping content.
-- "Where have I used this scripture before?" — check the manifest's scripture lists AND search the passages.
+- "Where have I used this reference before?" — check the manifest's reference lists AND search the passages.
 
 Be specific and cite chapter numbers/titles when you reference content. If something
 genuinely isn't in the manifest or retrieved passages, say so plainly rather than guessing —
@@ -178,10 +190,11 @@ async def save_message(
 
 
 async def get_history(project_id: str, db: AsyncSession, limit: int = 50) -> list[CompanionChatMessage]:
+    """Return the most recent `limit` messages, oldest first."""
     result = await db.execute(
         select(CompanionChatMessage)
         .where(CompanionChatMessage.project_id == project_id)
-        .order_by(CompanionChatMessage.created_at)
+        .order_by(CompanionChatMessage.created_at.desc())
         .limit(limit)
     )
-    return list(result.scalars().all())
+    return list(reversed(result.scalars().all()))

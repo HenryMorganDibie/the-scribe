@@ -24,10 +24,10 @@ interface ProjectSummary {
 }
 
 const SUGGESTED_PROMPTS = [
+  'What should I work on next?',
   'Have I already covered this idea anywhere?',
-  'Which chapter discusses calling and purpose?',
   'Am I repeating myself across chapters?',
-  'Where have I used Isaiah 61 before?',
+  'Is anything inconsistent with my book bible?',
 ]
 
 export default function CompanionChat() {

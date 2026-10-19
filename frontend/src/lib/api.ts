@@ -14,6 +14,36 @@ export function setCsrfToken(token: string | null) {
   csrfToken = token
 }
 
+export function getCsrfToken() {
+  return csrfToken
+}
+
+const PUBLIC_PATHS = ['/', '/login', '/signup']
+
+/**
+ * Whether a 401 should bounce the browser to /login. The session probe
+ * (/auth/me) is expected to 401 for logged-out visitors — the auth store
+ * handles that — and redirecting from a public page reloads it, which runs
+ * the probe again and loops forever.
+ */
+export function shouldRedirectToLogin(requestUrl: string | undefined, pathname: string) {
+  if (requestUrl?.replace(/^\//, '').startsWith('auth/me')) return false
+  return !PUBLIC_PATHS.includes(pathname)
+}
+
+/** Pull a readable message out of a non-2xx response body. */
+export async function errorMessageFrom(res: Response) {
+  try {
+    const body = await res.json()
+    if (typeof body?.detail === 'string') return body.detail
+    if (typeof body?.error === 'string') return body.error
+  } catch {
+    // Non-JSON body — fall through to the generic message.
+  }
+  if (res.status === 429) return 'Daily usage limit reached. Please try again tomorrow.'
+  return `Request failed (${res.status})`
+}
+
 export const api = axios.create({ baseURL: API_URL, withCredentials: true })
 
 api.interceptors.request.use((config) => {
@@ -30,7 +60,9 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       setCsrfToken(null)
       localStorage.removeItem('scribe_token') // clears sessions from the pre-cookie release
-      window.location.href = '/login'
+      if (shouldRedirectToLogin(err.config?.url, window.location.pathname)) {
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(err)
   }
@@ -55,6 +87,12 @@ export async function streamSSE(
     body: JSON.stringify(body),
   })
 
+  // Quota (429), CSRF (403) and ownership (404) failures arrive as JSON,
+  // not SSE — surface them instead of silently reporting an empty stream.
+  if (!res.ok) {
+    onError?.(await errorMessageFrom(res))
+    return
+  }
   if (!res.body) return
 
   const reader = res.body.getReader()

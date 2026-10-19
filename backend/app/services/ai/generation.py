@@ -11,11 +11,13 @@ from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
-from app.models import VoiceProfile, DocumentEmbedding, Testimony, Scripture, Chapter
+from app.models import VoiceProfile, DocumentEmbedding, Testimony, Scripture, Chapter, Project
 from app.services.voice.embeddings import EmbeddingService
 from app.services.ai.llm_client import get_llm_client, estimate_cost
 from app.services.ai.json_utils import strip_json_fences
-from app.services.scripture_lookup import filter_verified_anchor_scriptures
+from app.services.packs import get_pack, pack_for
+from app.services.book_bible import book_context
+from app.services.ai.voice_enrichment import finalize_dna, voice_dna_prompt
 
 import structlog
 
@@ -34,40 +36,55 @@ def _cadence_description(score: float) -> str:
         return "flowing, expansive sentences — layered clauses, builds toward a declaration"
 
 
-async def build_voice_brief(profile: VoiceProfile, chapter_context: Optional[str] = None) -> str:
+async def build_voice_brief(
+    profile: VoiceProfile,
+    chapter_context: Optional[str] = None,
+    project: Optional[Project] = None,
+) -> str:
     """
     Build the personalized ghost brief injected into every generation.
+    Genre-specific wording comes from the profile's pack (app/services/packs.py).
+    When `project` is given, its per-book style overrides the author's
+    defaults: its audience replaces theirs, its rules add to theirs.
     """
+    pack = pack_for(profile)
     cadence = _cadence_description(profile.cadence_score or 0.5)
-    scriptures = profile.anchor_scriptures or []
-    top_scriptures = [s["ref"] for s in scriptures[:8]] if scriptures else []
     phrases = profile.signature_phrases or []
     tags = profile.style_tags or []
     tones = profile.tone_preferences or []
-    translation = profile.preferred_translation or "NKJV"
-    guardrails = profile.theological_guardrails or []
+    book_rules = [r for r in ((project.style_rules if project else None) or []) if isinstance(r, str) and r.strip()]
+    rules = (profile.theological_guardrails or []) + book_rules
+    audience = (project.target_audience if project else None) or profile.target_audience or pack.default_audience
 
     samples_text = ""
     if profile.writing_samples:
-        samples = profile.writing_samples[:2]
-        samples_text = "\n---\n".join(samples[:1500])  # cap context
+        samples_text = "\n---\n".join(profile.writing_samples[:2])
 
-    brief = f"""You are ghostwriting for a Christian author. Study everything below and write ONLY in their voice.
+    scripture_lines = ""
+    if pack.uses_scripture:
+        scriptures = profile.anchor_scriptures or []
+        top_scriptures = [s["ref"] for s in scriptures[:8]]
+        scripture_lines = f"""PREFERRED BIBLE TRANSLATION: {profile.preferred_translation or 'NKJV'}
+
+ANCHOR SCRIPTURES (cite only these or verified scripture — never hallucinate references):
+{chr(10).join(f'  • {r}' for r in top_scriptures) if top_scriptures else '  • (none specified)'}
+"""
+
+    brief = f"""You are ghostwriting for {pack.author_noun}. Study everything below and write ONLY in their voice.
 
 ═══════════════════════════════════════
 VOICE BRIEF
 ═══════════════════════════════════════
 
-THEOLOGICAL LENS: {profile.theological_lens or 'Spirit-filled'}
-MINISTRY BACKGROUND: {profile.ministry_background or 'Not specified'}
-TARGET AUDIENCE: {profile.target_audience or 'Believers seeking deeper faith'}
-PREFERRED BIBLE TRANSLATION: {translation}
+{pack.lens_label}: {profile.theological_lens or pack.default_lens}
+{pack.background_label}: {profile.ministry_background or 'Not specified'}
+TARGET AUDIENCE: {audience}
 
-THEOLOGICAL GUARDRAILS (never contradict these):
-{chr(10).join(f'  • {rule}' for rule in guardrails) if guardrails else '  • Remain faithful to the stated theological lens and avoid asserting uncertain doctrine as fact.'}
+{pack.rules_label} (never contradict these):
+{chr(10).join(f'  • {rule}' for rule in rules) if rules else f'  • {pack.default_rule}'}
 
 WRITING TONES (ranked by prominence):
-{chr(10).join(f'  • {t}' for t in tones) if tones else '  • teaching, exhortation'}
+{chr(10).join(f'  • {t}' for t in tones) if tones else '  • (none specified — infer from samples)'}
 
 CADENCE & RHYTHM:
   {cadence}
@@ -78,9 +95,7 @@ SIGNATURE PHRASES (use naturally — never force, never repeat back-to-back):
 STYLE CHARACTERISTICS:
 {chr(10).join(f'  • {t}' for t in tags) if tags else '  • (none captured yet)'}
 
-ANCHOR SCRIPTURES (cite only these or verified scripture — never hallucinate references):
-{chr(10).join(f'  • {r}' for r in top_scriptures) if top_scriptures else '  • (none specified)'}
-
+{scripture_lines}
 VOICE SUMMARY (your internal compass for this author):
 {profile.voice_summary or 'No voice summary yet — use all available signals above.'}
 """
@@ -93,21 +108,42 @@ WRITING SAMPLES (study rhythm, paragraph length, vocabulary, opening hooks):
 ═══════════════════════════════════════
 """
 
-    if chapter_context:
-        brief += f"\nCHAPTER CONTEXT FROM PRIOR CHAPTERS (maintain doctrinal consistency):\n{chapter_context}\n"
+    if project is not None and (project.style_notes or "").strip():
+        brief += f"\nSTYLE NOTES FOR THIS BOOK (take precedence over general habits above):\n{project.style_notes.strip()[:2000]}\n"
 
-    brief += """
+    if chapter_context:
+        brief += f"\nCHAPTER CONTEXT FROM PRIOR CHAPTERS (maintain consistency of ideas, facts and claims):\n{chapter_context}\n"
+
+    brief += f"""
 ═══════════════════════════════════════
 RULES:
 1. Never break voice. Every sentence must sound like this author wrote it.
-2. Never cite a scripture not in the anchor list or verified index — hallucinated refs destroy trust.
-3. Never use generic Christian phrases that don't appear in their samples.
+2. {pack.reference_rule}
+3. Never use generic stock phrases that don't appear in their samples.
 4. Match their paragraph length, hook style, and closing cadence.
 5. If they use rhetorical questions — use them. If they don't — don't.
-6. Respect the theological guardrails above. If a request conflicts with them, flag the tension instead of presenting the conflict as this author's belief.
+6. Respect the {pack.rules_label.lower()} above. If a request conflicts with them, flag the tension instead of presenting the conflict as this author's view.
 ═══════════════════════════════════════
 """
     return brief
+
+
+def format_scene_plan(scenes, section_noun: str) -> str:
+    """The chapter's planned scenes/sections as a prompt block ("" if none)."""
+    lines = []
+    for i, scene in enumerate(s for s in (scenes or []) if isinstance(s, dict) and (s.get("title") or "").strip()):
+        details = [
+            f"POV: {scene['pov']}" if (scene.get("pov") or "").strip() else "",
+            f"Setting: {scene['setting']}" if (scene.get("setting") or "").strip() else "",
+        ]
+        meta = "; ".join(d for d in details if d)
+        line = f"  {i + 1}. {scene['title'].strip()}" + (f" [{meta}]" if meta else "")
+        if (scene.get("summary") or "").strip():
+            line += f" — {scene['summary'].strip()}"
+        lines.append(line)
+    if not lines:
+        return ""
+    return f"{section_noun.capitalize()} Plan (write these {section_noun}s, in this order):\n" + "\n".join(lines)
 
 
 async def retrieve_relevant_context(
@@ -207,11 +243,15 @@ async def generate_chapter_stream(
     # Get chapter memory (prior chapters)
     chapter_memory = await get_chapter_memory(project.id, chapter.chapter_number, db)
 
-    # Build voice brief
-    voice_brief = await build_voice_brief(profile, chapter_context=chapter_memory)
+    # Build voice brief (with this book's style) and the book's own knowledge
+    voice_brief = await build_voice_brief(profile, chapter_context=chapter_memory, project=project)
+    book_knowledge = await book_context(db, project, rag_query, chapter_id=chapter.id)
 
     # Build chapter brief
+    pack = pack_for(profile)
     testimonies_text = "\n\n".join(context["testimonies"]) if context["testimonies"] else "None retrieved."
+    grounding = f"- {pack.grounding_instruction}"
+    scene_plan = format_scene_plan(getattr(chapter, "scenes", None), pack.section_noun)
     relevant_samples = "\n---\n".join(context["samples"]) if context["samples"] else ""
 
     chapter_prompt = f"""{voice_brief}
@@ -221,7 +261,9 @@ MANUSCRIPT CONTEXT
 ════════════════════════════════════════
 Book Title: {project.title}
 Book Theme: {project.theme or 'Not specified'}
-Genre: {project.genre or 'teaching'}
+Genre: {project.genre or profile.theological_lens or pack.default_lens}
+
+{book_knowledge or '(No book facts or linked sources yet.)'}
 
 ════════════════════════════════════════
 THIS CHAPTER BRIEF
@@ -232,12 +274,14 @@ Intent (what this chapter must accomplish):
 {chapter.intent or 'Not specified'}
 
 Key Points to Cover:
-{chr(10).join(f'  {i+1}. {p}' for i, p in enumerate(chapter.key_points or []))}
+{chr(10).join(f'  {i+1}. {p}' for i, p in enumerate(chapter.key_points or [])) or '  (none specified)'}
 
-Anchor Scriptures for This Chapter:
-{chr(10).join(f'  • {s}' for s in (chapter.anchor_scriptures or []))}
+{scene_plan}
 
-Personal Story/Testimony to Weave In:
+{pack.reference_label} for This Chapter:
+{chr(10).join(f'  • {s}' for s in (chapter.anchor_scriptures or [])) or '  • (none specified)'}
+
+{pack.story_label} to Weave In:
 {testimonies_text}
 
 Relevant Writing Style References (retrieved):
@@ -248,10 +292,12 @@ GENERATION INSTRUCTIONS
 ════════════════════════════════════════
 Write the full chapter draft. Target 1,500–2,500 words.
 - Open with a strong hook in this author's exact voice
-- Weave the testimony naturally — not as an insert but as revelation
-- Anchor each major point to scripture (from the list above only)
-- Close with an invitation, declaration, or prophetic charge — consistent with their style
+- {'Use the story material only as inspiration — this is fiction' if pack.is_fiction else 'Weave the story in naturally — not as an insert but as part of the argument'}
+{grounding}
+- {f'Follow the {pack.section_noun} plan above in order' + (', separating scenes with a line containing only * * *' if pack.is_fiction else '') if scene_plan else 'Structure the chapter as this author would'}
+- {pack.closing_instruction}
 - Use their signature phrases naturally, not mechanically
+- Stay consistent with the established book facts: names, facts, terms and timeline must match them
 """
 
     llm = get_llm_client()
@@ -277,27 +323,30 @@ async def generate_voice_preview_stream(onboarding_data: dict, profile: Optional
     Live voice preview during onboarding.
     Streams a 150-word sample paragraph showing the emerging voice.
     """
-    lens = onboarding_data.get("theological_lens", "spirit-filled")
+    # Onboarding saves the chosen pack as a step, before the profile column
+    # is finalised, so prefer the in-progress answer.
+    pack = get_pack(onboarding_data.get("pack") or getattr(profile, "pack", None))
+    lens = onboarding_data.get("theological_lens") or pack.default_lens
     bg = onboarding_data.get("ministry_background", "")
     phrases = onboarding_data.get("signature_phrases", [])
     samples = onboarding_data.get("writing_samples", [])
-    tone = onboarding_data.get("tone_preferences", ["teaching"])
+    tone = onboarding_data.get("tone_preferences") or []
 
     sample_text = samples[0][:800] if samples else ""
     phrases_text = ", ".join(f'"{p}"' for p in phrases[:5]) if phrases else "none yet"
 
-    prompt = f"""You are learning to write in the voice of a Christian author.
+    prompt = f"""You are learning to write in the voice of {pack.author_noun}.
 
 Based on this partial profile:
-- Theological lens: {lens}
-- Ministry background: {bg[:200] if bg else 'not specified'}
+- {pack.lens_label.capitalize()}: {lens}
+- {pack.background_label.capitalize()}: {bg[:200] if bg else 'not specified'}
 - Signature phrases: {phrases_text}
-- Tone: {', '.join(tone) if isinstance(tone, list) else tone}
+- Tone: {', '.join(tone) if isinstance(tone, list) else tone or 'not specified'}
 {f'- Writing sample excerpt: "{sample_text}"' if sample_text else ''}
 
 Write a single vivid paragraph (120–150 words) as a preview of this author's voice.
-Pick a topic: the moment God calls someone into their purpose.
-Make it feel distinctly like THIS author — not generic Christian writing.
+Pick a topic that suits their genre — for example, {pack.preview_topic}.
+Make it feel distinctly like THIS author — not generic writing.
 No preamble. Just the paragraph."""
 
     llm = get_llm_client()
@@ -310,34 +359,15 @@ async def extract_voice_dna(profile: VoiceProfile, db: AsyncSession) -> dict:
     Background job: extract voice DNA from writing samples.
     Returns structured voice data to update the profile.
 
-    `anchor_scriptures` in the result is verified against the real Scripture
-    index before it's returned: an extracted ref that doesn't resolve to a
-    real verse (the model inventing a citation that isn't actually in the
-    writing samples) is dropped rather than stored on the profile.
+    For packs that use scripture, `anchor_scriptures` in the result is
+    verified against the real Scripture index (see finalize_dna).
     """
     samples = profile.writing_samples or []
     if not samples:
         return {}
 
     combined = "\n\n---\n\n".join(samples[:5])
-
-    prompt = f"""Analyze these writing samples from a Christian author and extract their voice DNA.
-
-WRITING SAMPLES:
-{combined[:4000]}
-
-Return a JSON object with exactly these keys:
-{{
-  "signature_phrases": ["list of 8-12 distinctive recurring phrases or sentence openers"],
-  "cadence_score": 0.0,  // 0.0 = very punchy/short sentences, 1.0 = very flowing/long sentences
-  "style_tags": ["list of 6-8 style characteristics like: rhetorical_questions, direct_address, repetition_for_emphasis, declarative_statements, scripture_integration, narrative_testimony, etc"],
-  "voice_summary": "300-word description of this author's voice that a ghostwriter could use as a compass",
-  "anchor_scriptures": [
-    {{"ref": "Isaiah 61:1", "themes": ["calling", "healing"]}}
-  ]
-}}
-
-Return ONLY valid JSON. No markdown, no explanation."""
+    prompt = voice_dna_prompt(pack_for(profile), "WRITING SAMPLES", combined[:4000])
 
     llm = get_llm_client()
     result = await llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=2000)
@@ -347,9 +377,7 @@ Return ONLY valid JSON. No markdown, no explanation."""
     try:
         text = strip_json_fences(raw)
         dna = json.loads(text)
-        if dna.get("anchor_scriptures"):
-            dna["anchor_scriptures"] = await filter_verified_anchor_scriptures(dna["anchor_scriptures"], db)
-        return dna
+        return await finalize_dna(dna, pack_for(profile), db)
     except Exception as e:
         logger.warning(
             "voice_dna_extraction_parse_failed",

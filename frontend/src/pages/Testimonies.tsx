@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Plus, ScrollText, Trash2, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
+import { cap } from '@/lib/packs'
+import { usePack } from '@/stores/authStore'
 
 interface Testimony {
   id: string
@@ -13,6 +15,8 @@ interface Testimony {
 }
 
 export default function Testimonies() {
+  const pack = usePack()
+  const noun = pack.story.singular
   const [testimonies, setTestimonies] = useState<Testimony[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -55,14 +59,14 @@ export default function Testimonies() {
         story,
         themes: themesInput.split(',').map((t) => t.trim()).filter(Boolean),
       })
-      toast.success('Testimony added to your vault')
+      toast.success(`${cap(noun)} added to your ${pack.story.vault}`)
       setTitle('')
       setStory('')
       setThemesInput('')
       setShowForm(false)
       load()
     } catch {
-      toast.error('Failed to save testimony')
+      toast.error(`Failed to save ${noun}`)
     }
   }
 
@@ -81,11 +85,11 @@ export default function Testimonies() {
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
           <ScrollText size={24} className="text-seal" />
-          <h1 className="font-display text-display-md font-semibold">Testimony Vault</h1>
+          <h1 className="font-display text-display-md font-semibold">{pack.story.vault}</h1>
         </div>
         <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2">
           {showForm ? <X size={16} /> : <Plus size={16} />}
-          {showForm ? 'Cancel' : 'Add Testimony'}
+          {showForm ? 'Cancel' : `Add ${cap(noun)}`}
         </button>
       </div>
 
@@ -103,7 +107,7 @@ export default function Testimonies() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="input-field w-full"
-              placeholder="The night God spoke through a dream"
+              placeholder={pack.usesScripture ? 'The night God spoke through a dream' : 'The week our biggest client walked away'}
             />
           </div>
           <div>
@@ -122,7 +126,7 @@ export default function Testimonies() {
               value={themesInput}
               onChange={(e) => setThemesInput(e.target.value)}
               className="input-field w-full"
-              placeholder="healing, faith, calling, perseverance"
+              placeholder={pack.usesScripture ? 'healing, faith, calling, perseverance' : 'resilience, leadership, failure, growth'}
             />
           </div>
           <button type="submit" className="btn-primary">Save to Vault</button>
@@ -131,7 +135,7 @@ export default function Testimonies() {
 
       {suggestions.length > 0 && (
         <div className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-3">Suggested from your sermons</h2>
+          <h2 className="font-display text-lg font-semibold mb-3">Suggested from your {pack.source.plural}</h2>
           <div className="space-y-3">
             {suggestions.map((t) => (
               <div key={t.id} className="card p-5 border-l-4 border-seal">
@@ -151,7 +155,7 @@ export default function Testimonies() {
         <div className="text-study-300">Loading...</div>
       ) : testimonies.length === 0 ? (
         <div className="text-center py-16 text-study-300">
-          Your vault is empty. Add your first testimony to start weaving your stories into your manuscripts.
+          Nothing here yet. Add your first {noun} to start weaving your stories into your manuscripts.
         </div>
       ) : (
         <div className="space-y-4">

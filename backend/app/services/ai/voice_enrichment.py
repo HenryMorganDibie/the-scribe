@@ -5,6 +5,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.ai.llm_client import get_llm_client
 from app.services.ai.json_utils import strip_json_fences
 from app.services.scripture_lookup import filter_verified_anchor_scriptures
+from app.services.packs import Pack, get_pack
+
+
+def voice_dna_prompt(pack: Pack, source_label: str, text: str) -> str:
+    """The voice-DNA extraction prompt, shared by onboarding samples and ingested sources."""
+    scripture_key = (
+        ',\n  "anchor_scriptures": [{"ref": "Isaiah 61:1", "themes": ["calling"]}]'
+        if pack.uses_scripture else ""
+    )
+    return f"""Analyze this text from {pack.author_noun} and extract their voice DNA.
+
+{source_label}:
+{text}
+
+Return a JSON object with exactly these keys:
+{{
+  "signature_phrases": ["8-12 distinctive recurring phrases or sentence openers"],
+  "cadence_score": 0.0,
+  "style_tags": ["6-8 style characteristics e.g. rhetorical_questions, direct_address, repetition_for_emphasis"],
+  "voice_summary": "300-word description a ghostwriter could use as a compass"{scripture_key}
+}}
+
+cadence_score: 0.0 = very punchy/short sentences, 1.0 = very flowing/long sentences.
+Return ONLY valid JSON. No markdown, no explanation."""
+
+
+async def finalize_dna(dna: dict, pack: Pack, db: AsyncSession) -> dict:
+    """Verify anchor scriptures for packs that use them; drop them for packs that don't."""
+    if not pack.uses_scripture:
+        dna.pop("anchor_scriptures", None)
+    elif dna.get("anchor_scriptures"):
+        dna["anchor_scriptures"] = await filter_verified_anchor_scriptures(dna["anchor_scriptures"], db)
+    return dna
 
 
 def _parse_dna_json(raw: str) -> dict:
@@ -16,34 +49,18 @@ def _parse_dna_json(raw: str) -> dict:
         return {}
 
 
-async def extract_dna_from_text(text: str, db: AsyncSession) -> dict:
+async def extract_dna_from_text(text: str, db: AsyncSession, pack: Pack | None = None) -> dict:
     """Run the voice-DNA extraction prompt over a transcript and return structured DNA.
 
-    `anchor_scriptures` in the result is verified against the real Scripture
-    index before it's returned: an extracted ref that doesn't resolve to a
-    real verse (the model inventing a citation that isn't actually in the
-    transcript) is dropped rather than stored on the profile.
+    For packs that use scripture, `anchor_scriptures` is verified against the
+    real Scripture index before it's returned: an extracted ref that doesn't
+    resolve to a real verse (the model inventing a citation that isn't
+    actually in the transcript) is dropped rather than stored on the profile.
     """
-    prompt = f"""Analyze this writing/sermon transcript from a Christian author and extract their voice DNA.
-
-TRANSCRIPT:
-{text[:4000]}
-
-Return a JSON object with exactly these keys:
-{{
-  "signature_phrases": ["8-12 distinctive recurring phrases or sentence openers"],
-  "cadence_score": 0.0,
-  "style_tags": ["6-8 style characteristics e.g. rhetorical_questions, direct_address, repetition_for_emphasis"],
-  "voice_summary": "300-word description a ghostwriter could use as a compass",
-  "anchor_scriptures": [{{"ref": "Isaiah 61:1", "themes": ["calling"]}}]
-}}
-
-Return ONLY valid JSON. No markdown, no explanation."""
+    pack = pack or get_pack(None)
+    prompt = voice_dna_prompt(pack, "TRANSCRIPT", text[:4000])
     result = await get_llm_client().complete(messages=[{"role": "user", "content": prompt}], max_tokens=2000)
-    dna = _parse_dna_json(result.text)
-    if dna.get("anchor_scriptures"):
-        dna["anchor_scriptures"] = await filter_verified_anchor_scriptures(dna["anchor_scriptures"], db)
-    return dna
+    return await finalize_dna(_parse_dna_json(result.text), pack, db)
 
 
 def merge_voice_dna(profile, new_dna: dict) -> dict:

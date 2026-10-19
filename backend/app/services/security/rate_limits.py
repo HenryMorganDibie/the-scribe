@@ -15,8 +15,20 @@ def _hash(value: str) -> str:
 
 
 def _client_ip(request: Request) -> str:
-    # Render/Cloudflare provide this header. Fall back safely for local tests.
-    return request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    """The client IP for per-IP limits.
+
+    Client-supplied headers can't be trusted: anyone can send
+    `x-forwarded-for: 1.2.3.4`. Each proxy we run behind *appends* the address
+    it received the request from, so with TRUSTED_PROXY_HOPS = n the real
+    client is the n-th entry from the right. 0 (the default) means no trusted
+    proxy: use the socket peer. Vercel → Render needs 2 (see render.yaml).
+    """
+    hops = settings.TRUSTED_PROXY_HOPS
+    if hops > 0:
+        entries = [e.strip() for e in request.headers.get("x-forwarded-for", "").split(",") if e.strip()]
+        if len(entries) >= hops:
+            return entries[-hops]
+    return request.client.host if request.client else "unknown"
 
 
 async def _count(

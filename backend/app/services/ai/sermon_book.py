@@ -4,6 +4,7 @@ from typing import Any
 
 from app.services.ai.json_utils import strip_json_fences
 from app.services.ai.llm_client import get_llm_client
+from app.services.packs import Pack, get_pack
 
 
 def _clean_chapters(raw: Any, target_chapters: int) -> list[dict]:
@@ -18,7 +19,8 @@ def _clean_chapters(raw: Any, target_chapters: int) -> list[dict]:
         points = item.get("key_points", [])
         if not isinstance(points, list):
             points = []
-        scriptures = item.get("anchor_scriptures", [])
+        # The prompt asks for "references"; older outputs used "anchor_scriptures".
+        scriptures = item.get("references", item.get("anchor_scriptures", []))
         if not isinstance(scriptures, list):
             scriptures = []
         chapters.append({
@@ -39,32 +41,42 @@ async def build_sermon_book_plan(
     preferred_translation: str | None,
     guardrails: list[str] | None,
     sermons: list,
+    pack: Pack | None = None,
 ) -> dict:
     """Ask the active model for a grounded book outline, then validate it."""
+    pack = pack or get_pack(None)
+    source_noun = pack.source_noun.upper()
     source_material = "\n\n".join(
-        f"SOURCE SERMON: {sermon.title}\n{(sermon.transcript or '')[:3500]}"
+        f"{source_noun}: {sermon.title}\n{(sermon.transcript or '')[:3500]}"
         for sermon in sermons
     )[:18000]
-    rules = "\n".join(f"- {rule}" for rule in (guardrails or []) if rule.strip()) or "- Remain faithful to the author's stated theological lens."
+    rules = "\n".join(f"- {rule}" for rule in (guardrails or []) if rule.strip()) or f"- {pack.default_rule}"
+    translation = (
+        f"PREFERRED BIBLE TRANSLATION: {preferred_translation or 'NKJV'}\n" if pack.uses_scripture else ""
+    )
+    reference_hint = (
+        "Reference only when explicitly supported by source material"
+        if pack.uses_scripture
+        else "Key source, quote or reference — only when explicitly present in the source material"
+    )
 
-    prompt = f"""You are a Christian book-development editor. Create a practical manuscript blueprint from ONLY the author's selected sermons.
+    prompt = f"""You are {pack.editor_role}. Create a practical manuscript blueprint from ONLY the author's selected {pack.source_noun}s.
 
 BOOK TITLE: {title}
-TARGET READER: {target_reader or 'General Christian reader'}
+TARGET READER: {target_reader or pack.default_audience}
 TARGET CHAPTER COUNT: {target_chapters}
-THEOLOGICAL LENS: {theological_lens or 'Not specified'}
-PREFERRED BIBLE TRANSLATION: {preferred_translation or 'NKJV'}
-THEOLOGICAL GUARDRAILS:
+{pack.lens_label}: {theological_lens or 'Not specified'}
+{translation}{pack.rules_label}:
 {rules}
 
-SELECTED SERMON SOURCES:
+SELECTED {source_noun}S:
 {source_material}
 
-Do not invent biographical claims, testimonies, or scripture references. Build a coherent progression from the supplied messages. Return ONLY valid JSON in this shape:
+Do not invent biographical claims, stories, facts, or references. Build a coherent progression from the supplied material. Return ONLY valid JSON in this shape:
 {{
   "theme": "one-sentence central promise of the book",
   "chapters": [
-    {{"title": "chapter title", "intent": "what this chapter accomplishes", "key_points": ["point"], "anchor_scriptures": ["Reference only when explicitly supported by source material"]}}
+    {{"title": "chapter title", "intent": "what this chapter accomplishes", "key_points": ["point"], "references": ["{reference_hint}"]}}
   ]
 }}
 """

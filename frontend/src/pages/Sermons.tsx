@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Upload, FileText, Loader2 , Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
+import { cap } from '@/lib/packs'
+import { usePack } from '@/stores/authStore'
 
 interface Sermon {
   id: string
@@ -16,6 +18,8 @@ interface Sermon {
 const ACTIVE = ['pending', 'extracting', 'analyzing']
 
 export default function Sermons() {
+  const pack = usePack()
+  const noun = pack.source.singular
   const [sermons, setSermons] = useState<Sermon[]>([])
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
@@ -29,7 +33,7 @@ export default function Sermons() {
     try {
       await api.delete(`/sermons/${id}`)
       setSermons((prev) => prev.filter((s) => s.id !== id))
-      toast.success('Sermon deleted')
+      toast.success(`${cap(noun)} deleted`)
     } catch {
       toast.error('Failed to delete')
     } finally {
@@ -38,7 +42,7 @@ export default function Sermons() {
   }
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const load = () => api.get('/sermons').then((r) => setSermons(r.data)).catch(() => toast.error('Failed to refresh sermons'))
+  const load = () => api.get('/sermons').then((r) => setSermons(r.data)).catch(() => toast.error(`Failed to refresh ${pack.source.plural}`))
 
   useEffect(() => { load() }, [])
 
@@ -54,7 +58,7 @@ export default function Sermons() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const file = fileRef.current?.files?.[0]
-    if (!title.trim()) return toast.error('Give the sermon a title')
+    if (!title.trim()) return toast.error(`Give the ${noun} a title`)
     if (!file && !text.trim()) return toast.error('Upload a file or paste text')
     if (file && file.size > MAX_FILE_BYTES) {
       return toast.error(`That file is ${Math.round(file.size / 1024 / 1024)}MB — the limit is 25MB.`)
@@ -74,7 +78,7 @@ export default function Sermons() {
         },
       })
 
-      toast.success('Sermon uploaded — processing in the background')
+      toast.success(`${cap(noun)} uploaded — processing in the background`)
       setTitle(''); setText('')
       if (fileRef.current) fileRef.current.value = ''
       load()
@@ -90,11 +94,11 @@ export default function Sermons() {
     <div className="px-4 py-6 md:p-8 max-w-4xl mx-auto">
       <div className="flex items-center gap-3 mb-8">
         <Upload size={24} className="text-seal" />
-        <h1 className="font-display text-display-md font-semibold">Sermons</h1>
+        <h1 className="font-display text-display-md font-semibold">{pack.nav.sources}</h1>
       </div>
       <p className="text-study-300 mb-6">
-        Upload sermons (PDF, DOCX, audio) or paste a transcript. The Scribe transcribes, learns your voice,
-        and mines personal stories into suggested testimonies.
+        {pack.source.hint} The Scribe transcribes, learns your voice,
+        and mines personal stories into suggested {pack.story.plural}.
       </p>
 
       <form onSubmit={submit} className="card p-6 mb-8 space-y-4">
@@ -102,7 +106,7 @@ export default function Sermons() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           className="input-field w-full"
-          placeholder="Sermon title"
+          placeholder={`${cap(noun)} title`}
         />
         <textarea
           value={text}
@@ -114,17 +118,17 @@ export default function Sermons() {
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.docx,.mp3,.m4a,.wav,.mpga"
+            accept=".pdf,.docx,.txt,.md,.mp3,.m4a,.wav,.mpga"
             className="block text-sm text-study-400"
           />
           <p className="text-xs text-study-300 mt-1">
-            PDF, DOCX, or audio (.mp3/.m4a/.wav, up to 25MB). Video files aren't supported yet —
+            PDF, DOCX, plain text or Markdown, or audio such as talks and podcasts (.mp3/.m4a/.wav, up to 25MB). Video files aren't supported yet —
             extract the audio first if you have a recording.
           </p>
         </div>
         <button type="submit" disabled={submitting} className="btn-primary flex items-center gap-2">
           {submitting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-          {submitting && uploadProgress !== null ? `Uploading… ${uploadProgress}%` : 'Upload sermon'}
+          {submitting && uploadProgress !== null ? `Uploading… ${uploadProgress}%` : `Upload ${noun}`}
         </button>
       </form>
 
@@ -163,7 +167,7 @@ export default function Sermons() {
             </div>
           </div>
         ))}
-        {sermons.length === 0 && <p className="text-study-300 text-center py-12">No sermons yet.</p>}
+        {sermons.length === 0 && <p className="text-study-300 text-center py-12">No {pack.source.plural} yet.</p>}
       </div>
     </div>
   )

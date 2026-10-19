@@ -5,13 +5,13 @@ Powers: chapter generation, continue writing, weave story, voice check, scriptur
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from pydantic import BaseModel, Field
 from typing import Optional, List
 import json
 
 from app.db.session import get_db
-from app.models import User, VoiceProfile, Testimony, GenerationLog
+from app.models import Chapter, User, VoiceProfile, Testimony, GenerationLog
 from app.core.security import get_current_user
 from app.api.ownership import get_owned_chapter, get_owned_project
 from app.services.ai.generation import (
@@ -23,6 +23,12 @@ from app.services.ai.llm_client import get_llm_client
 from app.services.scripture_lookup import fetch_scripture_text
 from app.core.config import settings
 from app.services.security.rate_limits import consume_user_quota
+from app.services.packs import pack_for
+from app.services.chapter_versions import snapshot_chapter
+from app.services.book_bible import book_context
+from app.services.style_signals import fiction_signals
+from app.api.sse import SSE_DONE, sse_error, sse_text, stream_llm
+from app.db.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/generate", tags=["generation"])
 
@@ -85,39 +91,43 @@ async def generate_chapter(
     profile = await _get_profile(current_user.id, db)
     await _consume_ai_request(current_user.id, db)
 
-    log = GenerationLog(user_id=current_user.id, chapter_id=chapter.id, action="generate_chapter", model=settings.LLM_PROVIDER)
-    db.add(log)
+    # The editor replaces the draft with the generated chapter — keep the
+    # current draft in history first, unconditionally.
+    await snapshot_chapter(db, chapter, "before_ai")
+    await db.commit()
+
+    chapter_id = chapter.id
 
     async def stream():
-        buffer = []
-        try:
-            async for chunk in generate_chapter_stream(profile, chapter, project, db):
-                if chunk.startswith("\n\n[META:"):
-                    # Parse metadata sentinel
-                    meta_str = chunk.replace("\n\n[META:", "").rstrip("]")
-                    meta = dict(kv.split("=") for kv in meta_str.split(","))
-                    log.tokens_in = int(meta.get("tokens_in", 0))
-                    log.tokens_out = int(meta.get("tokens_out", 0))
-                    log.cost_usd = float(meta.get("cost", 0))
-                    log.latency_ms = int(meta.get("latency", 0))
-                    log.model = meta.get("provider", settings.LLM_PROVIDER)
-                    log.success = True
-                    await db.commit()
-                else:
-                    buffer.append(chunk)
-                    yield f"data: {json.dumps({'text': chunk})}\n\n"
-        except Exception as e:
-            log.success = False
-            log.error_message = str(e)
-            await db.commit()
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        # The request's session is closed before a StreamingResponse body runs,
+        # so the stream opens (and closes) its own.
+        async with AsyncSessionLocal() as sdb:
+            log = GenerationLog(user_id=current_user.id, chapter_id=chapter_id, action="generate_chapter", model=settings.LLM_PROVIDER)
+            sdb.add(log)
+            wrote_any = False
+            try:
+                async for chunk in generate_chapter_stream(profile, chapter, project, sdb):
+                    if chunk.startswith("\n\n[META:"):
+                        meta_str = chunk.replace("\n\n[META:", "").rstrip("]")
+                        meta = dict(kv.split("=", 1) for kv in meta_str.split(","))
+                        log.tokens_in = int(meta.get("tokens_in", 0))
+                        log.tokens_out = int(meta.get("tokens_out", 0))
+                        log.cost_usd = float(meta.get("cost", 0))
+                        log.latency_ms = int(meta.get("latency", 0))
+                        log.model = meta.get("provider", settings.LLM_PROVIDER)
+                        log.success = True
+                    else:
+                        wrote_any = True
+                        yield sse_text(chunk)
+            except Exception as exc:
+                log.success = False
+                log.error_message = str(exc)[:2000]
+                yield sse_error(exc, "generate_chapter")
 
-        yield "data: [DONE]\n\n"
-
-        # Auto-update chapter status
-        if buffer:
-            chapter.status = "in_progress"
-            await db.commit()
+            if wrote_any:
+                await sdb.execute(update(Chapter).where(Chapter.id == chapter_id).values(status="in_progress"))
+            await sdb.commit()
+        yield SSE_DONE
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
@@ -131,12 +141,16 @@ async def continue_writing(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_owned_chapter(body.chapter_id, current_user.id, db)
+    chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
+    project = await get_owned_project(chapter.project_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
     await _consume_ai_request(current_user.id, db)
-    voice_brief = await build_voice_brief(profile)
+    voice_brief = await build_voice_brief(profile, project=project)
+    knowledge = await book_context(db, project, body.cursor_text[-1000:], chapter_id=chapter.id)
 
     prompt = f"""{voice_brief}
+
+{knowledge}
 
 Continue the following passage naturally in this author's voice.
 {f'Instruction: {body.instruction}' if body.instruction else ''}
@@ -144,13 +158,10 @@ Pick up seamlessly — do not repeat the last sentence.
 
 ...{body.cursor_text[-500:]}"""
 
-    async def stream():
-        llm = get_llm_client()
-        async for chunk in llm.stream(messages=[{"role": "user", "content": prompt}], max_tokens=800):
-            yield f"data: {json.dumps({'text': chunk})}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        stream_llm([{"role": "user", "content": prompt}], action="continue", max_tokens=800),
+        media_type="text/event-stream",
+    )
 
 
 # ─────────────────────────────────────────────
@@ -162,7 +173,8 @@ async def weave_story(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_owned_chapter(body.chapter_id, current_user.id, db)
+    chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
+    project = await get_owned_project(chapter.project_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
 
     result = await db.execute(select(Testimony).where(Testimony.id == body.testimony_id, Testimony.user_id == current_user.id))
@@ -170,29 +182,26 @@ async def weave_story(
     if not testimony:
         raise HTTPException(status_code=404, detail="Testimony not found")
 
-    voice_brief = await build_voice_brief(profile)
+    voice_brief = await build_voice_brief(profile, project=project)
     await _consume_ai_request(current_user.id, db)
 
     prompt = f"""{voice_brief}
 
-The author wants to weave this personal testimony into their writing:
+The author wants to weave this personal story into their writing:
 
-TESTIMONY:
+STORY ({pack_for(profile).story_label}):
 {testimony.story}
 
 CURRENT TEXT (insert after or integrate into):
 ...{body.cursor_text[-600:]}
 
-Naturally integrate or transition to the testimony. It should feel like revelation, not an insert.
+Naturally integrate or transition to the story. It should feel like part of the argument, not an insert.
 Write in the author's exact voice. 200–400 words."""
 
-    async def stream():
-        llm = get_llm_client()
-        async for chunk in llm.stream(messages=[{"role": "user", "content": prompt}], max_tokens=600):
-            yield f"data: {json.dumps({'text': chunk})}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        stream_llm([{"role": "user", "content": prompt}], action="weave_story", max_tokens=600),
+        media_type="text/event-stream",
+    )
 
 
 # ─────────────────────────────────────────────
@@ -255,6 +264,8 @@ Passage:
         "phrase_matches": analysis["phrase_matches"],
         "phrase_usage_rate": analysis["phrase_usage_rate"],
         "scripture_matches": analysis["scripture_matches"],
+        # Approximate POV / tense / dialogue share — fiction only.
+        "fiction_signals": fiction_signals(body.text) if pack_for(profile).is_fiction else None,
     }
 
 
@@ -269,6 +280,8 @@ async def scripture_suggest(
 ):
     await get_owned_chapter(body.chapter_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
+    if not pack_for(profile).uses_scripture:
+        raise HTTPException(status_code=400, detail="Scripture suggestions are only available for Christian writing.")
     await _consume_ai_request(current_user.id, db)
     anchor = [s["ref"] for s in (profile.anchor_scriptures or [])][:10]
     translation = profile.preferred_translation or "NKJV"
@@ -317,25 +330,26 @@ async def scribe_chat(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_owned_chapter(body.chapter_id, current_user.id, db)
+    chapter = await get_owned_chapter(body.chapter_id, current_user.id, db)
+    project = await get_owned_project(chapter.project_id, current_user.id, db)
     profile = await _get_profile(current_user.id, db)
     await _consume_ai_request(current_user.id, db)
-    voice_brief = await build_voice_brief(profile)
+    voice_brief = await build_voice_brief(profile, project=project)
+    knowledge = await book_context(db, project, body.message, chapter_id=chapter.id)
 
     system = f"""{voice_brief}
+
+{knowledge}
 
 You are The Scribe — an AI writing assistant built specifically for this author.
 You help them write their book in their own voice. You know them deeply.
 When they ask you to write, write in their voice. When they ask questions, be their creative partner.
-Be direct, warm, and ministerially aware."""
+{pack_for(profile).chat_persona}"""
 
     messages = body.history[-10:] if body.history else []
     messages.append({"role": "user", "content": body.message})
 
-    async def stream():
-        llm = get_llm_client()
-        async for chunk in llm.stream(messages=messages, system=system, max_tokens=1000):
-            yield f"data: {json.dumps({'text': chunk})}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        stream_llm(messages, action="chat", system=system, max_tokens=1000),
+        media_type="text/event-stream",
+    )
