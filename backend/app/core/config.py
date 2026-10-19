@@ -67,7 +67,14 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "rotate"
 
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    ANTHROPIC_MODEL: str = "claude-opus-5-5"
+    # Claude thinks before answering (always on for current models) and that
+    # thinking counts toward max_tokens: this headroom is added to every reply
+    # budget so drafts aren't cut short. Unused tokens aren't billed.
+    ANTHROPIC_EFFORT: str = "medium"  # low | medium | high | xhigh | max
+    ANTHROPIC_THINKING_HEADROOM_TOKENS: int = 8000
+    # No text streams until thinking finishes, so allow longer than other providers.
+    ANTHROPIC_FIRST_CHUNK_TIMEOUT_SECONDS: float = 120.0
 
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "openai/gpt-oss-120b"

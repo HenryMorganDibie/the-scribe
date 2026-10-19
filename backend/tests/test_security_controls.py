@@ -112,7 +112,7 @@ async def test_browser_session_stores_hashes_not_raw_tokens():
 
 
 def test_new_bearer_tokens_are_versioned():
-    from jose import jwt
+    import jwt
     from app.core.config import settings
 
     token = create_access_token({"sub": "user-1"})
@@ -123,3 +123,33 @@ def test_production_rejects_insecure_cookie_configuration():
     config = Settings(ENVIRONMENT="production", SECRET_KEY="a" * 32, SESSION_COOKIE_SECURE=False)
     with pytest.raises(RuntimeError):
         config.validate_for_startup()
+
+
+def test_bcrypt_hashes_verify_including_old_passlib_hashes():
+    import bcrypt as raw_bcrypt
+    from app.core.security import hash_password, verify_password
+
+    hashed = hash_password("correct horse battery staple")
+    assert hashed.startswith("$2b$")
+    assert verify_password("correct horse battery staple", hashed)
+    assert not verify_password("wrong password entirely", hashed)
+
+    # passlib's bcrypt scheme stored plain "$2b$12$..." strings — exactly what bcrypt writes.
+    legacy = raw_bcrypt.hashpw(b"an existing user's password", raw_bcrypt.gensalt(rounds=12)).decode()
+    assert verify_password("an existing user's password", legacy)
+
+
+def test_verify_password_never_raises():
+    from app.core.security import verify_password
+
+    assert verify_password("x" * 100, "$2b$12$" + "a" * 53) is False   # over 72 bytes
+    assert verify_password("anything", "not-a-bcrypt-hash") is False
+
+
+def test_legacy_python_jose_tokens_still_decode():
+    import jwt
+    from app.core.config import settings
+
+    # python-jose and PyJWT both produce standard HS256 JWTs.
+    token = jwt.encode({"sub": "u1", "v": 2}, settings.SECRET_KEY, algorithm="HS256")
+    assert jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])["sub"] == "u1"

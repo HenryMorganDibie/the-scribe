@@ -54,7 +54,7 @@ services:
       - key: OLLAMA_CLOUD_MODEL
         value: gpt-oss:120b
       - key: ANTHROPIC_MODEL
-        value: claude-sonnet-4-20250514
+        value: claude-opus-5-5
       # ── Secrets / environment-specific: set these in the dashboard ────────
       - key: DATABASE_URL
         sync: false                      # Supabase SESSION POOLER URL (IPv4).

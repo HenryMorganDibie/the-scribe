@@ -159,7 +159,7 @@ it rotates across providers instead of committing to a single one:
 2. **Groq's free tier** — `GROQ_MODEL` first, then `openai/gpt-oss-120b` →
    `openai/gpt-oss-20b` → `qwen/qwen3.6-27b` as fallbacks if one is
    rate-limited or erroring.
-3. **Anthropic** (`claude-sonnet-4`) — last resort, only reached if every
+3. **Anthropic** (`claude-opus-5-5`) — last resort, only reached if every
    Groq/Ollama candidate above is unavailable, and only tried at all if
    `ANTHROPIC_API_KEY` is set.
 
@@ -178,7 +178,7 @@ To pin to exactly one provider instead (no rotation), set:
 LLM_PROVIDER=anthropic   # or "groq" — disables rotation entirely
 
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-opus-5-5
 
 GROQ_API_KEY=gsk_...
 GROQ_MODEL=openai/gpt-oss-120b

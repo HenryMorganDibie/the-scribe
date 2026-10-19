@@ -86,7 +86,7 @@ Later improvements noticed while building Phase 3:
 
 ---
 
-## Hardening — before inviting more writers (first six items: pending commit)
+## Hardening — before inviting more writers (first six items: commit `182eb62`)
 
 Reliability and security work left from the code review. Do these before new features.
 
@@ -97,8 +97,9 @@ Reliability and security work left from the code review. Do these before new fea
 - [x] Durable background jobs: job table + runner + recovery on startup; mark interrupted source uploads as failed (migration `0011`)
 - [x] Rate-limit client IP: `TRUSTED_PROXY_HOPS` picks the proxy-appended entry; `cf-connecting-ip` no longer trusted
   - [ ] Still open: requests sent straight to the onrender.com URL can spoof their IP — needs a network restriction so only Vercel can reach the API
-- [ ] Browser test pass of every flow (onboarding per pack, editor tabs, book bible, progress, exports)
-- [ ] Upgrade unmaintained / old dependencies (`python-jose` → PyJWT, `passlib` → `bcrypt`, `anthropic` SDK, Anthropic model id)
+- [ ] Browser test pass of every flow — checklist in [docs/BROWSER_TEST_CHECKLIST.md](BROWSER_TEST_CHECKLIST.md)
+- [x] Upgrade unmaintained / old dependencies: `python-jose` → PyJWT 2.15, `passlib` → `bcrypt` 5.0, `anthropic` 0.34 → 1.15, model `claude-sonnet-4-20250514` → `claude-opus-5-5` (thinking headroom, explicit effort, server-side refusal fallback)
+  - [ ] Not yet upgraded: FastAPI/Starlette, SQLAlchemy, groq and the rest of `requirements.txt`; move `pytest` out of the production requirements
 - [ ] Log every AI action in `generation_logs` (continue, chat, weave, companion, checks) so cost tracking is complete
 - [ ] Remove dead code / stale docs (dramatiq/Railway references, unused `supabase`, Render static-site frontend) — commented-out onboarding, `REDIS_URL` and `app/utils/jobs.py` already removed
 

@@ -428,7 +428,7 @@ class GenerationLog(Base):
     chapter_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True)
 
     action: Mapped[str] = mapped_column(String)  # generate_chapter|continue|weave_story|voice_check|preview|chat
-    model: Mapped[str] = mapped_column(String, default="claude-sonnet-4-20250514")
+    model: Mapped[str] = mapped_column(String, default="unknown")  # provider id that served it
 
     tokens_in: Mapped[Optional[int]] = mapped_column(Integer)
     tokens_out: Mapped[Optional[int]] = mapped_column(Integer)

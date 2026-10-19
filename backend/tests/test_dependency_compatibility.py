@@ -4,14 +4,14 @@ from io import BytesIO
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
 from pypdf import PdfReader, PdfWriter
 
 from app.core.config import settings
 from app.core.security import create_access_token
 
 
-def test_python_jose_jwt_round_trip():
+def test_pyjwt_round_trip():
     token = create_access_token(
         {"sub": "dependency-check-user"},
         expires_delta=timedelta(minutes=5),

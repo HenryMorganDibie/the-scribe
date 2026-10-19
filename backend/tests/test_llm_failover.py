@@ -62,3 +62,86 @@ async def test_timed_out_provider_is_put_in_cooldown():
 async def test_all_providers_hung_raises_with_reason():
     with pytest.raises(RuntimeError, match="no response within"):
         await asyncio.wait_for(_collect(_router(HungProvider())), timeout=5)
+
+
+# ── Anthropic provider (anthropic 1.x) ──────────────────────────────
+
+class _FakeStream:
+    def __init__(self, texts, stop_reason="end_turn", category=None):
+        from types import SimpleNamespace
+
+        self._texts = texts
+        self._final = SimpleNamespace(
+            stop_reason=stop_reason,
+            stop_details=SimpleNamespace(category=category) if stop_reason == "refusal" else None,
+            usage=SimpleNamespace(input_tokens=11, output_tokens=22),
+        )
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    @property
+    def text_stream(self):
+        async def gen():
+            for t in self._texts:
+                yield t
+        return gen()
+
+    async def get_final_message(self):
+        return self._final
+
+
+def _anthropic_with(stream, captured):
+    from types import SimpleNamespace
+    from app.services.ai.llm_client import AnthropicProvider
+
+    provider = AnthropicProvider(api_key="sk-test", model="claude-opus-5-5")
+
+    def fake_stream(**kwargs):
+        captured.update(kwargs)
+        return stream
+
+    provider._client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(stream=fake_stream)))
+    return provider
+
+
+async def test_anthropic_request_adds_thinking_headroom_effort_and_fallback(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ANTHROPIC_THINKING_HEADROOM_TOKENS", 8000)
+    monkeypatch.setattr(settings, "ANTHROPIC_EFFORT", "medium")
+    captured = {}
+    provider = _anthropic_with(_FakeStream(["Hello ", "there"]), captured)
+
+    text = "".join([c async for c in provider.stream([{"role": "user", "content": "hi"}], "Be brief.", 300)])
+
+    assert text == "Hello there"
+    assert captured["model"] == "claude-opus-5-5"
+    assert captured["max_tokens"] == 8300          # reply budget + thinking headroom
+    assert captured["output_config"] == {"effort": "medium"}
+    assert captured["betas"] == ["server-side-fallback-2026-07-01"]
+    assert captured["fallbacks"] == "default"
+    assert captured["system"] == "Be brief."
+    assert "temperature" not in captured
+    assert (provider.last_usage.input_tokens, provider.last_usage.output_tokens) == (11, 22)
+
+
+async def test_refusal_fails_over_without_putting_anthropic_in_cooldown():
+    from app.services.ai.llm_client import LLMRefusal
+
+    refusing = _anthropic_with(_FakeStream([], stop_reason="refusal", category="cyber"), {})
+    with pytest.raises(LLMRefusal, match="cyber"):
+        _ = [c async for c in refusing.stream([{"role": "user", "content": "x"}], None, 10)]
+
+    refusing = _anthropic_with(_FakeStream([], stop_reason="refusal", category="cyber"), {})
+    router = _router(refusing, WorkingProvider())
+    assert await _collect(router) == "Hello world"
+    assert router._health.is_available("anthropic")  # a decline is not an outage
+
+
+async def test_anthropic_gets_its_own_longer_first_chunk_timeout():
+    provider = _anthropic_with(_FakeStream(["x"]), {})
+    assert provider.first_chunk_timeout >= 60

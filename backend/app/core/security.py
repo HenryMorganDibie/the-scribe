@@ -3,8 +3,8 @@ import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
+import jwt
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
@@ -13,16 +13,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
+# Passwords: bcrypt directly (passlib is unmaintained). Hashes made by the old
+# passlib setup are standard "$2b$" bcrypt and verify unchanged.
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        # Malformed hash, or a password over bcrypt's 72-byte limit.
+        return False
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -132,7 +137,7 @@ async def get_current_user(
             user_id: str = payload.get("sub")
             if user_id is None or payload.get("v") != 2:
                 raise credentials_exception
-        except JWTError:
+        except jwt.PyJWTError:
             raise credentials_exception
     else:
         session = await get_browser_session(request, db)

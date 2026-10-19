@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 
 import pytest
-from jose import jwt
+import jwt
 
 from app.api.routes import auth
 from app.core.config import settings
