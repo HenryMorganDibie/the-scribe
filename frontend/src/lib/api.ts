@@ -31,6 +31,26 @@ export function shouldRedirectToLogin(requestUrl: string | undefined, pathname: 
   return !PUBLIC_PATHS.includes(pathname)
 }
 
+/**
+ * Turn a FastAPI `detail` into a toast-safe string. Validation errors (422)
+ * send an array of `{loc, msg}` objects, which would otherwise render blank.
+ */
+export function detailMessage(detail: unknown, fallback: string) {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        const msg = String(item?.msg ?? '').replace(/^Value error, /, '')
+        const field = Array.isArray(item?.loc) ? item.loc[item.loc.length - 1] : null
+        if (!msg) return null
+        return typeof field === 'string' ? `${field.replace(/_/g, ' ')}: ${msg}` : msg
+      })
+      .filter(Boolean)
+    if (messages.length) return messages.join('\n')
+  }
+  return fallback
+}
+
 /** Pull a readable message out of a non-2xx response body. */
 export async function errorMessageFrom(res: Response) {
   try {

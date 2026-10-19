@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import QuillLogo from '@/components/ui/QuillLogo'
 import { useAuthStore } from '@/stores/authStore'
+import { detailMessage } from '@/lib/api'
 import GoogleSignInButton from '@/components/auth/GoogleSignInButton'
 
 export default function Signup() {
@@ -20,7 +21,7 @@ export default function Signup() {
       await signup(email, password, fullName)
       navigate('/onboarding')
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Signup failed')
+      toast.error(detailMessage(err.response?.data?.detail, 'Signup failed'))
     } finally {
       setLoading(false)
     }
@@ -32,7 +33,7 @@ export default function Signup() {
       await googleLogin(credential)
       navigate('/onboarding')
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Google sign-in failed')
+      toast.error(detailMessage(err.response?.data?.detail, 'Google sign-in failed'))
     } finally {
       setLoading(false)
     }
@@ -75,11 +76,12 @@ export default function Signup() {
               <input
                 type="password"
                 required
-                minLength={8}
+                minLength={15}
+                maxLength={64}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="input-field w-full"
-                placeholder="At least 8 characters"
+                placeholder="At least 15 characters"
               />
             </div>
             <button type="submit" disabled={loading} className="btn-primary w-full mt-2">
