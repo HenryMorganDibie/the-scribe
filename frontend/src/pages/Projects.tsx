@@ -240,7 +240,7 @@ export default function Projects() {
               <h3 className="font-display text-lg font-semibold mb-1 pr-14">{p.title}</h3>
               <span className="text-xs text-seal capitalize">{p.genre}</span>
               {p.theme && <p className="text-sm text-study-300 mt-2 line-clamp-2">{p.theme}</p>}
-              <div className="mt-3 text-xs text-ink0">{p.target_chapters} chapters target</div>
+              <div className="mt-3 text-xs text-study-400">{p.target_chapters} chapters target</div>
             </Link>
           ))}
         </div>

@@ -36,6 +36,25 @@
   .btn-ghost {
     @apply bg-transparent text-study-400 hover:text-seal transition-colors duration-150;
   }
+  .icon-btn {
+    @apply inline-flex items-center justify-center w-9 h-9 rounded text-study-400 hover:text-study-700 hover:bg-paper-200 transition-colors disabled:opacity-50;
+  }
+  .toolbar-btn {
+    @apply inline-flex items-center gap-1.5 h-9 px-2.5 rounded text-sm font-medium text-study-400 hover:text-study-700 hover:bg-paper-200 transition-colors;
+  }
+  .toolbar-btn-on {
+    @apply bg-study-700 text-paper-100 hover:bg-study-600 hover:text-paper-100;
+  }
+  /* Selection toolbar over the manuscript */
+  .bubble-btn {
+    @apply inline-flex items-center justify-center w-8 h-8 rounded text-paper-100 hover:bg-study-500 transition-colors;
+  }
+  .bubble-btn-on {
+    @apply bg-study-500 text-seal-200;
+  }
+  .menu-item {
+    @apply block w-full text-left px-3.5 py-2 text-sm text-ink hover:bg-paper-100;
+  }
 
   /* Form fields */
   .input-field {

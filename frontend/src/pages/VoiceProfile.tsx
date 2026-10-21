@@ -286,7 +286,7 @@ export default function VoiceProfile() {
         </p>
 
         {timeline.length === 0 ? (
-          <div className="text-ink0 text-sm italic">No voice versions yet.</div>
+          <div className="text-study-400 text-sm italic">No voice versions yet.</div>
         ) : (
           <div className="relative pl-8 space-y-6">
             <div className="absolute left-3 top-2 bottom-2 w-px bg-paper-200" />
@@ -326,7 +326,7 @@ export default function VoiceProfile() {
                         {idx < timeline.length - 1 && (
                           cadenceDelta > 0.02 ? <TrendingUp size={12} className="text-green-400" /> :
                           cadenceDelta < -0.02 ? <TrendingDown size={12} className="text-blue-400" /> :
-                          <Minus size={12} className="text-ink0" />
+                          <Minus size={12} className="text-study-400" />
                         )}
                       </span>
                     </div>

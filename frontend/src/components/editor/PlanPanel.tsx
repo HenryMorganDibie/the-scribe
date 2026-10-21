@@ -85,7 +85,7 @@ export default function PlanPanel({ projectId, chapterId, intent, keyPoints, sce
       <div className="space-y-2">
         <p className="text-xs text-study-400">{cap(noun.plural)}, in order</p>
         {draftScenes.length === 0 && (
-          <p className="text-xs text-ink0 italic">
+          <p className="text-xs text-study-400 italic">
             No {noun.plural} planned. Add them to have the draft follow your structure{pack.isFiction ? ', with a point of view and setting for each' : ''}.
           </p>
         )}

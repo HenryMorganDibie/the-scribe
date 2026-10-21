@@ -384,7 +384,7 @@ export default function Onboarding() {
             )}
 
             {!preview && !previewLoading && (
-              <div className="text-ink0 text-sm italic">
+              <div className="text-study-400 text-sm italic">
                 Your preview will appear here once you've shared a bit more about your voice —
                 keep going.
               </div>
@@ -398,7 +398,7 @@ export default function Onboarding() {
             )}
           </div>
 
-          <div className="mt-4 text-xs text-ink0">
+          <div className="mt-4 text-xs text-study-400">
             This preview updates as you complete key sections of the interview.
           </div>
         </div>
