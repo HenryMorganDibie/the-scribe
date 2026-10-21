@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { Plus, GripVertical, FileText, Download, ArrowLeft, X, MessageCircle, Trash2, Library } from 'lucide-react'
+import { Plus, GripVertical, FileText, ArrowLeft, X, MessageCircle, Trash2, Library, MoreVertical } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent,
@@ -14,6 +14,7 @@ import BookStylePanel from '@/components/studio/BookStylePanel'
 import BookSourcesPanel from '@/components/studio/BookSourcesPanel'
 import ProgressPanel from '@/components/studio/ProgressPanel'
 import RepetitionPanel from '@/components/studio/RepetitionPanel'
+import ExportMenu from '@/components/ui/ExportMenu'
 import { STAGES, stageOf, type Stage } from '@/lib/stages'
 
 interface Chapter {
@@ -39,6 +40,44 @@ interface ProjectDetail {
   style_notes?: string | null
 }
 
+/** "⋮" menu on a chapter row, so delete isn't one stray click away. */
+function RowMenu({ title, onDelete }: { title: string; onDelete: () => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={(e) => { e.preventDefault(); setOpen((o) => !o) }}
+        className="icon-btn"
+        aria-label={`More actions for ${title}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <MoreVertical size={16} />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-full mt-1 z-20 w-44 card py-1 shadow-paper-lift">
+          <button
+            role="menuitem"
+            onClick={() => { setOpen(false); onDelete() }}
+            className="menu-item flex items-center gap-2 text-red-700 hover:bg-red-50"
+          >
+            <Trash2 size={14} /> Delete chapter
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SortableChapter({ chapter, projectId, onDelete, onStageChange }: {
   chapter: Chapter
   projectId: string
@@ -49,19 +88,17 @@ function SortableChapter({ chapter, projectId, onDelete, onStageChange }: {
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }
 
   return (
-    <div ref={setNodeRef} style={style} className="card p-4 flex items-center gap-3">
-      <button {...attributes} {...listeners} className="text-ink0 hover:text-seal cursor-grab active:cursor-grabbing">
+    <div ref={setNodeRef} style={style} className="card px-3 py-3 md:px-4 flex items-center gap-3 hover:border-seal/50">
+      <button {...attributes} {...listeners} className="text-study-200 hover:text-seal cursor-grab active:cursor-grabbing" aria-label={`Reorder ${chapter.title}`}>
         <GripVertical size={18} />
       </button>
+      <span className="text-xs text-study-400 font-mono w-10 flex-shrink-0">Ch. {chapter.chapter_number}</span>
       <Link to={`/projects/${projectId}/chapters/${chapter.id}`} className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-ink0 font-mono">Ch. {chapter.chapter_number}</span>
-          <h3 className="font-medium text-ink truncate">{chapter.title}</h3>
-        </div>
-        <div className="flex items-center gap-3 mt-1 text-xs text-study-300">
-          <span>{chapter.word_count || 0} words</span>
-          {chapter.voice_match_score && <span>Voice match: {Math.round(chapter.voice_match_score * 100)}%</span>}
-        </div>
+        <h3 className="font-display font-semibold text-[17px] text-ink truncate">{chapter.title}</h3>
+        <p className="text-xs text-study-400 mt-0.5">
+          {(chapter.word_count || 0).toLocaleString()} words
+          {chapter.voice_match_score ? ` · voice match ${Math.round(chapter.voice_match_score * 100)}%` : ''}
+        </p>
       </Link>
       <select
         value={stageOf(chapter.status).id}
@@ -71,13 +108,7 @@ function SortableChapter({ chapter, projectId, onDelete, onStageChange }: {
       >
         {STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
       </select>
-      <button
-        onClick={(e) => { e.preventDefault(); onDelete(chapter.id) }}
-        className="p-1.5 text-study-300 hover:text-red-600 hover:bg-red-50 rounded"
-        title="Delete chapter"
-      >
-        <Trash2 size={14} />
-      </button>
+      <RowMenu title={chapter.title} onDelete={() => onDelete(chapter.id)} />
     </div>
   )
 }
@@ -90,6 +121,7 @@ export default function ManuscriptStudio() {
   const [chTitle, setChTitle] = useState('')
   const [chIntent, setChIntent] = useState('')
   const [exporting, setExporting] = useState<'docx' | 'pdf' | null>(null)
+  const [view, setView] = useState<'chapters' | 'settings'>('chapters')
   const handleDeleteChapter = async (chapterId: string) => {
     if (!project) return
     const ch = project.chapters.find((c) => c.id === chapterId)
@@ -193,85 +225,102 @@ export default function ManuscriptStudio() {
 
   return (
     <div className="px-4 py-6 md:p-8 max-w-4xl mx-auto">
-      <Link to="/projects" className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-4">
+      <Link to="/projects" className="text-sm text-study-400 hover:text-seal flex items-center gap-1 mb-4">
         <ArrowLeft size={14} /> All manuscripts
       </Link>
 
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-2">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
         <div>
           <h1 className="font-display text-display-md font-semibold">{project.title}</h1>
-          <span className="text-sm text-seal capitalize">{project.genre}</span>
+          <p className="text-study-400">
+            <span className="text-seal capitalize">{project.genre}</span>
+            {project.theme && <> · {project.theme}</>}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to={`/projects/${project.id}/bible`} className="btn-secondary flex items-center gap-2 text-sm">
             <Library size={16} /> Book Bible
           </Link>
           <Link to={`/projects/${project.id}/companion-chat`} className="btn-secondary flex items-center gap-2 text-sm">
-            <MessageCircle size={16} /> Companion Chat
+            <MessageCircle size={16} /> Ask your book
           </Link>
-          <button onClick={() => handleExport('docx')} disabled={!!exporting} className="btn-secondary flex items-center gap-2 text-sm">
-            <Download size={16} /> {exporting === 'docx' ? 'Exporting...' : 'Export .docx'}
-          </button>
-          <button onClick={() => handleExport('pdf')} disabled={!!exporting} className="btn-secondary flex items-center gap-2 text-sm">
-            <Download size={16} /> {exporting === 'pdf' ? 'Exporting...' : 'Export .pdf'}
-          </button>
-          <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2 text-sm">
+          <ExportMenu onExport={handleExport} busy={!!exporting} />
+          <button
+            onClick={() => { setView('chapters'); setShowForm(!showForm) }}
+            className="btn-primary flex items-center gap-2 text-sm"
+          >
             {showForm ? <X size={16} /> : <Plus size={16} />}
-            {showForm ? 'Cancel' : 'Add Chapter'}
+            {showForm ? 'Cancel' : 'Add chapter'}
           </button>
         </div>
       </div>
-
-      {project.theme && <p className="text-study-300 mb-6">{project.theme}</p>}
 
       <ProgressPanel projectId={project.id} refreshKey={progressKey} />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <BookStylePanel
-          projectId={project.id}
-          targetAudience={project.target_audience}
-          styleRules={project.style_rules}
-          styleNotes={project.style_notes}
-          onSaved={load}
-        />
-        <BookSourcesPanel projectId={project.id} linked={project.source_sermons} onSaved={load} />
+      <div className="flex gap-6 border-b border-paper-300 mb-5" role="tablist">
+        {([
+          ['chapters', `Chapters · ${project.chapters.length}`],
+          ['settings', 'Book settings'],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={view === id}
+            onClick={() => setView(id)}
+            className={`py-3 -mb-px text-[15px] font-medium border-b-2 transition-colors ${view === id ? 'text-seal border-seal' : 'text-study-400 border-transparent hover:text-study-700'}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {showForm && (
-        <form onSubmit={handleAddChapter} className="card p-6 mb-6 space-y-4 animate-fade-in-up">
-          <div>
-            <label className="block text-sm text-study-400 mb-1.5">Chapter Title</label>
-            <input required value={chTitle} onChange={(e) => setChTitle(e.target.value)} className="input-field w-full" placeholder="The Wilderness Season" />
+      {view === 'settings' ? (
+        <div className="space-y-4 animate-fade-in-up">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <BookStylePanel
+              projectId={project.id}
+              targetAudience={project.target_audience}
+              styleRules={project.style_rules}
+              styleNotes={project.style_notes}
+              onSaved={load}
+            />
+            <BookSourcesPanel projectId={project.id} linked={project.source_sermons} onSaved={load} />
           </div>
-          <div>
-            <label className="block text-sm text-study-400 mb-1.5">Intent</label>
-            <textarea value={chIntent} onChange={(e) => setChIntent(e.target.value)} className="input-field w-full h-24 resize-none" placeholder="What should this chapter accomplish for the reader?" />
-          </div>
-          <button type="submit" className="btn-primary">Add Chapter</button>
-        </form>
-      )}
-
-      {project.chapters.length === 0 ? (
-        <div className="text-center py-16">
-          <FileText size={32} className="mx-auto text-ink0 mb-3" />
-          <p className="text-study-300 mb-4">No chapters yet. Add your first chapter to begin.</p>
+          {project.chapters.length > 1 && <RepetitionPanel projectId={project.id} />}
         </div>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={project.chapters.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-            <div className="space-y-2">
-              {project.chapters.map((ch) => (
-                <SortableChapter key={ch.id} chapter={ch} projectId={project.id} onDelete={handleDeleteChapter} onStageChange={handleStageChange} />
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
-      )}
+        <>
+          {showForm && (
+            <form onSubmit={handleAddChapter} className="card p-6 mb-6 space-y-4 animate-fade-in-up">
+              <div>
+                <label htmlFor="chapter-title" className="block text-sm text-study-400 mb-1.5">Chapter Title</label>
+                <input id="chapter-title" required value={chTitle} onChange={(e) => setChTitle(e.target.value)} className="input-field w-full" placeholder="The Wilderness Season" />
+              </div>
+              <div>
+                <label htmlFor="chapter-intent" className="block text-sm text-study-400 mb-1.5">Intent</label>
+                <textarea id="chapter-intent" value={chIntent} onChange={(e) => setChIntent(e.target.value)} className="input-field w-full h-24 resize-none" placeholder="What should this chapter accomplish for the reader?" />
+              </div>
+              <button type="submit" className="btn-primary">Add Chapter</button>
+            </form>
+          )}
 
-      {project.chapters.length > 1 && (
-        <div className="mt-6">
-          <RepetitionPanel projectId={project.id} />
-        </div>
+          {project.chapters.length === 0 ? (
+            <div className="text-center py-16">
+              <FileText size={32} className="mx-auto text-study-200 mb-3" />
+              <p className="text-study-400 mb-4">No chapters yet. Add your first chapter to begin.</p>
+            </div>
+          ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={project.chapters.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-2">
+                  {project.chapters.map((ch) => (
+                    <SortableChapter key={ch.id} chapter={ch} projectId={project.id} onDelete={handleDeleteChapter} onStageChange={handleStageChange} />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
+        </>
       )}
     </div>
   )

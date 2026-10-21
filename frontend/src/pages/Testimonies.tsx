@@ -163,7 +163,7 @@ export default function Testimonies() {
             <div key={t.id} className="card p-5">
               <div className="flex items-start justify-between mb-2">
                 <h3 className="font-display text-lg font-semibold">{t.title}</h3>
-                <button onClick={() => handleDelete(t.id)} className="text-ink0 hover:text-red-400">
+                <button onClick={() => handleDelete(t.id)} className="text-study-400 hover:text-red-400">
                   <Trash2 size={16} />
                 </button>
               </div>

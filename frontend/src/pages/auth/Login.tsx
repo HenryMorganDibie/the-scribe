@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import QuillLogo from '@/components/ui/QuillLogo'
 import { useAuthStore } from '@/stores/authStore'
 import GoogleSignInButton from '@/components/auth/GoogleSignInButton'
+import PasswordInput from '@/components/auth/PasswordInput'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -58,9 +59,10 @@ export default function Login() {
               />
             </div>
             <div>
-              <label className="block text-sm text-study-400 mb-1.5">Password</label>
-              <input
-                type="password"
+              <label htmlFor="password" className="block text-sm text-study-400 mb-1.5">Password</label>
+              <PasswordInput
+                id="password"
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

@@ -79,7 +79,7 @@ export default function HistoryPanel({ projectId, chapterId, refreshKey, onResto
         Earlier drafts of this chapter, kept automatically while you write and before every AI draft.
       </p>
       {versions.length === 0 && (
-        <p className="text-sm text-ink0 italic">No earlier versions yet — they appear as the chapter changes.</p>
+        <p className="text-sm text-study-400 italic">No earlier versions yet — they appear as the chapter changes.</p>
       )}
       {versions.map((v) => (
         <div key={v.id} className="card p-3 text-sm">

@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import CharacterCount from '@tiptap/extension-character-count'
 import {
-  ArrowLeft, Sparkles, Wand2, BookOpen, ScrollText, CheckCircle2,
-  Send, Loader2, Download, Save, X,
+  ChevronLeft, Sparkles, Wand2, BookOpen, ScrollText, CheckCircle2,
+  Send, Loader2, X, Check, AlertCircle, Maximize2, Minimize2,
+  Bold, Italic, Heading2, Quote,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api, getCsrfToken, streamSSE } from '@/lib/api'
@@ -16,6 +17,7 @@ import ChapterNotesPanel from '@/components/editor/ChapterNotesPanel'
 import ConsistencyCheck from '@/components/editor/ConsistencyCheck'
 import PlanPanel, { type Scene } from '@/components/editor/PlanPanel'
 import QuoteCheck from '@/components/editor/QuoteCheck'
+import ExportMenu from '@/components/ui/ExportMenu'
 import { STAGES, stageOf, type Stage } from '@/lib/stages'
 
 interface Chapter {
@@ -54,28 +56,38 @@ interface VoiceCheck {
   fiction_signals?: { pov: string; tense: string; dialogue_ratio: number } | null
 }
 
-type SidebarTab = 'actions' | 'chat' | 'plan' | 'notes' | 'history'
+type SidebarTab = 'assist' | 'plan' | 'notes' | 'history'
 
 const SIDEBAR_TABS: { id: SidebarTab; label: string }[] = [
-  { id: 'actions', label: 'Actions' },
-  { id: 'chat', label: 'Chat' },
+  { id: 'assist', label: 'Assist' },
   { id: 'plan', label: 'Plan' },
   { id: 'notes', label: 'Notes' },
   { id: 'history', label: 'History' },
 ]
+
+type SaveState = 'saved' | 'unsaved' | 'saving' | 'error'
+
+const SAVE_LABELS: Record<SaveState, string> = {
+  saved: 'Saved',
+  unsaved: 'Unsaved changes',
+  saving: 'Saving…',
+  error: 'Not saved, retry',
+}
 
 export default function ChapterEditor() {
   const pack = usePack()
   const { id: projectId, chapterId } = useParams<{ id: string; chapterId: string }>()
   const [chapter, setChapter] = useState<Chapter | null>(null)
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>('saved')
+  const [focused, setFocused] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [testimonies, setTestimonies] = useState<Testimony[]>([])
   const [voiceCheck, setVoiceCheck] = useState<VoiceCheck | null>(null)
   const [mobileAiOpen, setMobileAiOpen] = useState(false)
   const [scriptureSuggestions, setScriptureSuggestions] = useState<any[]>([])
-  const [tab, setTab] = useState<SidebarTab>('actions')
+  const [tab, setTab] = useState<SidebarTab>('assist')
   const [historyKey, setHistoryKey] = useState(0)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -97,6 +109,7 @@ export default function ChapterEditor() {
       },
     },
     onUpdate: ({ editor }) => {
+      setSaveState('unsaved')
       // Debounced autosave
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
       saveTimeoutRef.current = setTimeout(() => {
@@ -167,17 +180,16 @@ export default function ChapterEditor() {
   }, [projectId, chapterId, editor])
 
   const autoSave = async (content: string, wordCount: number) => {
-    setSaving(true)
+    setSaveState('saving')
     try {
       await api.put(`/projects/${projectId}/chapters/${chapterId}`, {
         content,
         word_count: wordCount,
         trigger_indexing: false,
       })
+      setSaveState('saved')
     } catch {
-      // silent
-    } finally {
-      setSaving(false)
+      setSaveState('error')
     }
   }
 
@@ -196,7 +208,8 @@ export default function ChapterEditor() {
 
   const manualSave = async () => {
     if (!editor) return
-    setSaving(true)
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+    setSaveState('saving')
     const content = editor.getHTML()
     const wordCount = editor.storage.characterCount.words()
     try {
@@ -207,11 +220,10 @@ export default function ChapterEditor() {
       })
       lastIndexedHtmlRef.current = content
       setHistoryKey((k) => k + 1)
-      toast.success('Saved')
+      setSaveState('saved')
     } catch {
+      setSaveState('error')
       toast.error('Save failed')
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -408,109 +420,154 @@ export default function ChapterEditor() {
   if (loading || !chapter) return <div className="p-8 text-study-300">Loading chapter...</div>
 
   const wordCount = editor?.storage.characterCount.words() || 0
+  const showPanel = panelOpen && !focused
+  const saveBefore = async () => {
+    if (editor) await autoSave(editor.getHTML(), editor.storage.characterCount.words())
+  }
 
   return (
-    <div className="flex flex-col md:flex-row h-screen">
-      {/* Editor */}
-      <div className="flex-1 overflow-y-auto min-w-0">
-        <div className="max-w-3xl mx-auto px-8 py-8">
-          <Link to={`/projects/${projectId}`} className="text-sm text-study-300 hover:text-seal flex items-center gap-1 mb-4">
-            <ArrowLeft size={14} /> Back to manuscript
-          </Link>
-
-          <div className="flex items-start justify-between mb-6">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-ink0 font-mono">Chapter {chapter.chapter_number}</span>
-                <select
-                  value={stageOf(chapter.status).id}
-                  onChange={(e) => handleStageChange(e.target.value as Stage)}
-                  className={`status-tag cursor-pointer ${stageOf(chapter.status).className}`}
-                  aria-label="Chapter stage"
-                >
-                  {STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                </select>
-              </div>
-              <h1 className="font-display text-display-md font-semibold">{chapter.title}</h1>
-              {chapter.intent && <p className="text-study-300 mt-1 text-sm">{chapter.intent}</p>}
-            </div>
-            <div className="flex gap-2 flex-shrink-0">
-              <button onClick={() => handleExportChapter('docx')} className="btn-secondary text-sm flex items-center gap-1.5">
-                <Download size={14} /> Export .docx
-              </button>
-              <button onClick={() => handleExportChapter('pdf')} className="btn-secondary text-sm flex items-center gap-1.5">
-                <Download size={14} /> Export .pdf
-              </button>
-              <button onClick={manualSave} disabled={saving} className="btn-secondary text-sm flex items-center gap-1.5">
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                {saving ? 'Saving' : 'Save'}
-              </button>
-            </div>
-          </div>
-
-          {(!chapter.content || chapter.content.length < 20) && !generating && (
-            <button onClick={handleGenerateChapter} className="btn-primary w-full flex items-center justify-center gap-2 mb-6 py-3">
-              <Sparkles size={18} /> Generate Chapter Draft in My Voice
+    <div className={focused ? 'fixed inset-0 z-40 bg-paper flex' : 'flex h-screen'}>
+      {/* Writing column */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top bar */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 md:px-5 py-2 border-b border-paper-300 bg-paper">
+          {!focused && (
+            <>
+              <Link to={`/projects/${projectId}`} className="text-sm text-study-400 hover:text-seal flex items-center gap-1">
+                <ChevronLeft size={16} /> Manuscript
+              </Link>
+              <span className="text-study-200" aria-hidden="true">/</span>
+            </>
+          )}
+          <span className="folio">Chapter {chapter.chapter_number}</span>
+          <select
+            value={stageOf(chapter.status).id}
+            onChange={(e) => handleStageChange(e.target.value as Stage)}
+            className={`status-tag cursor-pointer ${stageOf(chapter.status).className}`}
+            aria-label="Chapter stage"
+          >
+            {STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+          <span className="flex-1" />
+          <button
+            onClick={manualSave}
+            disabled={saveState === 'saving'}
+            title="Save now and add a version to History"
+            className={`flex items-center gap-1.5 text-sm px-2 py-1 rounded hover:bg-paper-200 ${saveState === 'error' ? 'text-seal' : 'text-study-400'}`}
+          >
+            {saveState === 'saving' ? <Loader2 size={14} className="animate-spin" />
+              : saveState === 'error' ? <AlertCircle size={14} />
+              : saveState === 'saved' ? <Check size={14} />
+              : <span className="w-1.5 h-1.5 rounded-full bg-seal-300" aria-hidden="true" />}
+            {SAVE_LABELS[saveState]}
+          </button>
+          {!focused && <ExportMenu iconOnly onExport={handleExportChapter} />}
+          <button
+            onClick={() => setFocused((f) => !f)}
+            className={`toolbar-btn ${focused ? 'toolbar-btn-on' : ''}`}
+            title={focused ? 'Exit focus mode' : 'Hide everything except your writing'}
+          >
+            {focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            {focused ? 'Exit focus' : 'Focus'}
+          </button>
+          {!focused && (
+            <button
+              onClick={() => setPanelOpen((o) => !o)}
+              aria-pressed={panelOpen}
+              className={`toolbar-btn hidden md:inline-flex ${panelOpen ? 'toolbar-btn-on' : ''}`}
+            >
+              <Sparkles size={16} /> The Scribe
             </button>
           )}
+        </div>
 
-          {generating && (
-            <div className="flex items-center gap-2 text-seal text-sm mb-4 animate-pulse">
-              <Sparkles size={16} /> The Scribe is writing in your voice...
-            </div>
-          )}
+        {/* Manuscript */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-[680px] mx-auto px-5 md:px-8 py-10">
+            <h1 className="font-display text-display-md font-semibold">{chapter.title}</h1>
+            {chapter.intent && <p className="text-study-400 mt-1 mb-8">{chapter.intent}</p>}
 
-          <div className="border-t border-paper-300 pt-6">
-            <EditorContent editor={editor} />
-          </div>
-
-          <div className="mt-6 text-xs text-ink0 flex items-center gap-4">
-            <span>{wordCount} words</span>
-            {voiceCheck && (
-              <span className="flex items-center gap-1">
-                <CheckCircle2 size={12} className="text-seal" />
-                Voice match: {Math.round(voiceCheck.score * 100)}% ({voiceCheck.grade})
-              </span>
+            {(!chapter.content || chapter.content.length < 20) && !generating && (
+              <button onClick={handleGenerateChapter} className="btn-primary w-full flex items-center justify-center gap-2 mb-6 py-3">
+                <Sparkles size={18} /> Generate Chapter Draft in My Voice
+              </button>
             )}
+
+            {generating && (
+              <div className="flex items-center gap-2 text-seal text-sm mb-4 animate-pulse">
+                <Sparkles size={16} /> The Scribe is writing in your voice...
+              </div>
+            )}
+
+            {editor && (
+              <BubbleMenu editor={editor} tippyOptions={{ duration: 120 }} className="flex items-center gap-0.5 p-1 bg-study-700 rounded-md shadow-paper-lift">
+                <button onClick={() => editor.chain().focus().toggleBold().run()} aria-label="Bold" aria-pressed={editor.isActive('bold')} className={`bubble-btn ${editor.isActive('bold') ? 'bubble-btn-on' : ''}`}><Bold size={15} /></button>
+                <button onClick={() => editor.chain().focus().toggleItalic().run()} aria-label="Italic" aria-pressed={editor.isActive('italic')} className={`bubble-btn ${editor.isActive('italic') ? 'bubble-btn-on' : ''}`}><Italic size={15} /></button>
+                <button onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} aria-label="Heading" aria-pressed={editor.isActive('heading', { level: 2 })} className={`bubble-btn ${editor.isActive('heading', { level: 2 }) ? 'bubble-btn-on' : ''}`}><Heading2 size={15} /></button>
+                <button onClick={() => editor.chain().focus().toggleBlockquote().run()} aria-label="Quote" aria-pressed={editor.isActive('blockquote')} className={`bubble-btn ${editor.isActive('blockquote') ? 'bubble-btn-on' : ''}`}><Quote size={15} /></button>
+              </BubbleMenu>
+            )}
+
+            <EditorContent editor={editor} />
+
+            <div className="mt-8 pt-4 border-t border-paper-300 text-xs text-study-400 flex flex-wrap items-center gap-4">
+              <span>{wordCount.toLocaleString()} words</span>
+              {voiceCheck && (
+                <span className="flex items-center gap-1">
+                  <CheckCircle2 size={12} className="text-seal" />
+                  Voice match: {Math.round(voiceCheck.score * 100)}% ({voiceCheck.grade})
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Mobile AI toggle button — floating, bottom-right */}
-      <button
-        onClick={() => setMobileAiOpen(true)}
-        className="fixed bottom-5 right-5 z-30 md:hidden btn-primary rounded-full p-3 shadow-lg flex items-center gap-2"
-      >
-        <Sparkles size={18} />
-        <span className="text-sm font-medium">AI Tools</span>
-      </button>
+      {!focused && (
+        <button
+          onClick={() => setMobileAiOpen(true)}
+          className="fixed bottom-5 right-5 z-30 md:hidden btn-primary rounded-full p-3 shadow-lg flex items-center gap-2"
+        >
+          <Sparkles size={18} />
+          <span className="text-sm font-medium">The Scribe</span>
+        </button>
+      )}
 
-      {/* Scribe AI Sidebar — desktop: fixed right panel; mobile: full-screen overlay */}
+      {/* The Scribe panel — desktop: collapsible right column; mobile: slide-over */}
       {mobileAiOpen && (
         <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileAiOpen(false)} />
       )}
-      <div className={`
-        bg-paper-200 flex flex-col border-paper-300
-        md:w-96 md:border-l md:relative md:translate-x-0
-        fixed inset-y-0 right-0 z-50 w-full max-w-sm border-l
-        transition-transform duration-200
-        ${mobileAiOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}
-      `}>
+      <aside
+        aria-label="The Scribe"
+        className={`
+          bg-paper-200 flex-col border-paper-300 border-l
+          fixed inset-y-0 right-0 z-50 w-full max-w-sm flex
+          transition-transform duration-200
+          ${mobileAiOpen ? 'translate-x-0' : 'translate-x-full'}
+          ${showPanel ? 'md:static md:z-auto md:w-96 md:max-w-none md:translate-x-0' : 'md:hidden'}
+        `}
+      >
         <div className="p-4 border-b border-paper-300 flex items-center gap-2">
           <Sparkles size={18} className="text-seal" />
           <h2 className="font-display text-display-xs font-semibold flex-1">The Scribe</h2>
-          <button onClick={() => setMobileAiOpen(false)} className="md:hidden text-study-300 hover:text-study-700">
-            <X size={20} />
+          <button
+            onClick={() => { setMobileAiOpen(false); setPanelOpen(false) }}
+            className="icon-btn"
+            aria-label="Close panel"
+          >
+            <X size={18} />
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-paper-300">
+        <div className="flex border-b border-paper-300" role="tablist">
           {SIDEBAR_TABS.map(({ id, label }) => (
             <button
               key={id}
+              role="tab"
+              aria-selected={tab === id}
               onClick={() => setTab(id)}
-              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${tab === id ? 'text-seal border-b-2 border-seal' : 'text-study-300 hover:text-study-400'}`}
+              className={`flex-1 py-3 text-sm font-medium transition-colors border-b-2 ${tab === id ? 'text-seal border-seal' : 'text-study-400 border-transparent hover:text-study-700'}`}
             >
               {label}
             </button>
@@ -539,173 +596,173 @@ export default function ChapterEditor() {
           />
         ) : tab === 'notes' ? (
           <ChapterNotesPanel projectId={projectId!} chapterId={chapterId!} />
-        ) : tab === 'actions' ? (
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* Continue writing */}
-            <button
-              onClick={handleContinue}
-              disabled={!!actionLoading || generating}
-              className="w-full card p-3 text-left hover:border-seal/50 flex items-start gap-3 disabled:opacity-50"
-            >
-              <Wand2 size={18} className="text-seal flex-shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-medium text-sm">Continue Writing</h3>
-                <p className="text-xs text-study-300">Pick up from where you left off, in your voice.</p>
-              </div>
-              {actionLoading === 'continue' && <Loader2 size={14} className="animate-spin text-seal ml-auto" />}
-            </button>
-
-            {/* Voice check */}
-            <button
-              onClick={handleVoiceCheck}
-              disabled={!!actionLoading}
-              className="w-full card p-3 text-left hover:border-seal/50 flex items-start gap-3 disabled:opacity-50"
-            >
-              <CheckCircle2 size={18} className="text-seal flex-shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-medium text-sm">Check My Voice</h3>
-                <p className="text-xs text-study-300">Score this chapter against your voice profile.</p>
-              </div>
-              {actionLoading === 'voice-check' && <Loader2 size={14} className="animate-spin text-seal ml-auto" />}
-            </button>
-
-            {voiceCheck?.feedback && (
-              <div className="bg-seal-50 border border-seal-100 rounded-lg p-3 text-sm">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-medium text-seal-400">Voice Match: {Math.round(voiceCheck.score * 100)}%</span>
-                  <span className="text-xs text-study-300">{voiceCheck.grade}</span>
-                </div>
-                <p className="text-study-400 text-xs">{voiceCheck.feedback}</p>
-                <div className="mt-3 pt-3 border-t border-seal-100 space-y-2 text-xs text-study-400">
-                  <p><span className="font-medium text-seal-400">Cadence:</span> {voiceCheck.cadence_delta === undefined ? 'Run a fresh check to compare cadence.' : `${voiceCheck.cadence_delta >= 0 ? 'Slightly more flowing' : 'Slightly more punchy'} than your baseline`}</p>
-                  {voiceCheck.phrase_matches && voiceCheck.phrase_matches.length > 0 && <p><span className="font-medium text-seal-400">Voice signals found:</span> {voiceCheck.phrase_matches.join(' · ')}</p>}
-                  {voiceCheck.scripture_matches && voiceCheck.scripture_matches.length > 0 && <p><span className="font-medium text-seal-400">Anchor scriptures used:</span> {voiceCheck.scripture_matches.join(' · ')}</p>}
-                  {voiceCheck.fiction_signals && (
-                    <p title="Approximate — based on word counts in the narration">
-                      <span className="font-medium text-seal-400">Narration (approx.):</span>{' '}
-                      {voiceCheck.fiction_signals.pov} · {voiceCheck.fiction_signals.tense} tense · {Math.round(voiceCheck.fiction_signals.dialogue_ratio * 100)}% dialogue
-                    </p>
-                  )}
-                  {(!voiceCheck.phrase_matches || voiceCheck.phrase_matches.length === 0) && (!voiceCheck.scripture_matches || voiceCheck.scripture_matches.length === 0) && <p>Check the chapter after adding more of your own language{pack.usesScripture ? ' or scripture anchors' : ''} to see evidence here.</p>}
-                </div>
-              </div>
-            )}
-
-            {/* Consistency against the book bible */}
-            {pack.verifiesQuotes && (
-              <QuoteCheck
-                projectId={projectId!}
-                chapterId={chapterId!}
-                disabled={!!actionLoading}
-                beforeCheck={async () => {
-                  if (editor) await autoSave(editor.getHTML(), editor.storage.characterCount.words())
-                }}
-              />
-            )}
-
-            <ConsistencyCheck
-              projectId={projectId!}
-              chapterId={chapterId!}
-              disabled={!!actionLoading}
-              beforeCheck={async () => {
-                if (editor) await autoSave(editor.getHTML(), editor.storage.characterCount.words())
-              }}
-            />
-
-            {/* Weave story */}
-            <div className="card p-3">
-              <div className="flex items-start gap-3 mb-2">
-                <ScrollText size={18} className="text-seal flex-shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="font-medium text-sm">Weave In My Story</h3>
-                  <p className="text-xs text-study-300">Pull from your {pack.story.vault}.</p>
-                </div>
-              </div>
-              {testimonies.length === 0 ? (
-                <p className="text-xs text-ink0 ml-8">
-                  No {pack.story.plural} yet — <Link to="/testimonies" className="text-seal underline">add one</Link>
-                </p>
-              ) : (
-                <div className="ml-8 space-y-1.5">
-                  {testimonies.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => handleWeaveStory(t.id)}
-                      disabled={!!actionLoading}
-                      className="w-full text-left text-xs px-2.5 py-1.5 bg-paper-200 hover:bg-seal-50 hover:text-seal-400 rounded border border-paper-300 transition-colors disabled:opacity-50"
-                    >
-                      {t.title}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {actionLoading === 'weave' && <Loader2 size={14} className="animate-spin text-seal ml-8 mt-2" />}
-            </div>
-
-            {/* Scripture suggestions — only for packs with a verified scripture index */}
-            {pack.usesScripture && (<>
-            <button
-              onClick={handleScriptureSuggest}
-              disabled={!!actionLoading}
-              className="w-full card p-3 text-left hover:border-seal/50 flex items-start gap-3 disabled:opacity-50"
-            >
-              <BookOpen size={18} className="text-seal flex-shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-medium text-sm">Suggest Scripture Anchor</h3>
-                <p className="text-xs text-study-300">Get verified scriptures fitting this passage.</p>
-              </div>
-              {actionLoading === 'scripture' && <Loader2 size={14} className="animate-spin text-seal ml-auto" />}
-            </button>
-
-            {scriptureSuggestions.length > 0 && (
-              <div className="space-y-2">
-                {scriptureSuggestions.map((s, i) => (
-                  <div key={i} className="scripture-block py-2 px-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-mono text-xs not-italic text-seal-400">{s.ref}</span>
-                      <button onClick={() => insertScripture(s)} className="text-xs text-seal hover:underline not-italic">
-                        Insert
-                      </button>
-                    </div>
-                    <p className="text-sm">{s.text}</p>
-                    {s.reason && <p className="text-xs text-study-300 not-italic mt-1">{s.reason}</p>}
+        ) : (
+          <>
+            {chatMessages.length > 0 ? (
+              /* A conversation replaces the action list until it's cleared */
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <button
+                  onClick={() => setChatMessages([])}
+                  disabled={chatStreaming}
+                  className="text-xs text-study-400 hover:text-seal flex items-center gap-1 disabled:opacity-50"
+                >
+                  <ChevronLeft size={14} /> Back to actions
+                </button>
+                {chatMessages.map((m, i) => (
+                  <div key={i} className={`text-sm rounded-lg p-3 whitespace-pre-wrap ${m.role === 'user' ? 'bg-paper-100 ml-6' : 'bg-seal-50 border border-seal-100 mr-6'}`}>
+                    {m.content || (chatStreaming && i === chatMessages.length - 1 && <Loader2 size={14} className="animate-spin text-seal" />)}
                   </div>
                 ))}
               </div>
-            )}
-            </>)}
-          </div>
-        ) : (
-          <>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {chatMessages.length === 0 && (
-                <p className="text-sm text-ink0 italic">
-                  Ask The Scribe anything — "Make this more vivid", "What's missing from this chapter?",
-                  "Suggest a stronger opening hook"...
-                </p>
-              )}
-              {chatMessages.map((m, i) => (
-                <div key={i} className={`text-sm rounded-lg p-3 ${m.role === 'user' ? 'bg-paper-200 ml-6' : 'bg-seal-50 border border-seal-100 mr-6'}`}>
-                  {m.content || (chatStreaming && i === chatMessages.length - 1 && <Loader2 size={14} className="animate-spin text-seal" />)}
+            ) : (
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <p className="folio">Write</p>
+
+                <button
+                  onClick={handleContinue}
+                  disabled={!!actionLoading || generating}
+                  className="w-full card p-3 text-left hover:border-seal/50 flex items-start gap-3 disabled:opacity-50"
+                >
+                  <Wand2 size={18} className="text-seal flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-medium text-sm">Continue Writing</h3>
+                    <p className="text-xs text-study-400">Pick up from where you left off, in your voice.</p>
+                  </div>
+                  {actionLoading === 'continue' && <Loader2 size={14} className="animate-spin text-seal ml-auto" />}
+                </button>
+
+                <div className="card p-3">
+                  <div className="flex items-start gap-3 mb-2">
+                    <ScrollText size={18} className="text-seal flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h3 className="font-medium text-sm">Weave In My Story</h3>
+                      <p className="text-xs text-study-400">Pull from your {pack.story.vault}.</p>
+                    </div>
+                  </div>
+                  {testimonies.length === 0 ? (
+                    <p className="text-xs text-study-400 ml-8">
+                      No {pack.story.plural} yet — <Link to="/testimonies" className="text-seal underline">add one</Link>
+                    </p>
+                  ) : (
+                    <div className="ml-8 space-y-1.5">
+                      {testimonies.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => handleWeaveStory(t.id)}
+                          disabled={!!actionLoading}
+                          className="w-full text-left text-xs px-2.5 py-1.5 bg-paper-200 hover:bg-seal-50 hover:text-seal-400 rounded border border-paper-300 transition-colors disabled:opacity-50"
+                        >
+                          {t.title}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {actionLoading === 'weave' && <Loader2 size={14} className="animate-spin text-seal ml-8 mt-2" />}
                 </div>
-              ))}
-            </div>
-            <div className="p-4 border-t border-paper-300 flex gap-2">
-              <input
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !chatStreaming && handleChatSend()}
-                className="input-field flex-1 text-sm"
-                placeholder="Ask The Scribe..."
-                disabled={chatStreaming}
-              />
-              <button onClick={handleChatSend} disabled={chatStreaming || !chatInput.trim()} className="btn-primary px-3 disabled:opacity-50">
-                <Send size={16} />
-              </button>
+
+                <p className="folio pt-2">Check</p>
+
+                <button
+                  onClick={handleVoiceCheck}
+                  disabled={!!actionLoading}
+                  className="w-full card p-3 text-left hover:border-seal/50 flex items-start gap-3 disabled:opacity-50"
+                >
+                  <CheckCircle2 size={18} className="text-seal flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-medium text-sm">Check My Voice</h3>
+                    <p className="text-xs text-study-400">
+                      {voiceCheck ? `Last check: ${Math.round(voiceCheck.score * 100)}%, ${voiceCheck.grade.toLowerCase()}.` : 'Score this chapter against your voice profile.'}
+                    </p>
+                  </div>
+                  {actionLoading === 'voice-check' && <Loader2 size={14} className="animate-spin text-seal ml-auto" />}
+                </button>
+
+                {voiceCheck?.feedback && (
+                  <div className="bg-seal-50 border border-seal-100 rounded-lg p-3 text-sm">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-seal-400">Voice Match: {Math.round(voiceCheck.score * 100)}%</span>
+                      <span className="text-xs text-study-400">{voiceCheck.grade}</span>
+                    </div>
+                    <p className="text-study-400 text-xs">{voiceCheck.feedback}</p>
+                    <div className="mt-3 pt-3 border-t border-seal-100 space-y-2 text-xs text-study-400">
+                      <p><span className="font-medium text-seal-400">Cadence:</span> {voiceCheck.cadence_delta === undefined ? 'Run a fresh check to compare cadence.' : `${voiceCheck.cadence_delta >= 0 ? 'Slightly more flowing' : 'Slightly more punchy'} than your baseline`}</p>
+                      {voiceCheck.phrase_matches && voiceCheck.phrase_matches.length > 0 && <p><span className="font-medium text-seal-400">Voice signals found:</span> {voiceCheck.phrase_matches.join(' · ')}</p>}
+                      {voiceCheck.scripture_matches && voiceCheck.scripture_matches.length > 0 && <p><span className="font-medium text-seal-400">Anchor scriptures used:</span> {voiceCheck.scripture_matches.join(' · ')}</p>}
+                      {voiceCheck.fiction_signals && (
+                        <p title="Approximate — based on word counts in the narration">
+                          <span className="font-medium text-seal-400">Narration (approx.):</span>{' '}
+                          {voiceCheck.fiction_signals.pov} · {voiceCheck.fiction_signals.tense} tense · {Math.round(voiceCheck.fiction_signals.dialogue_ratio * 100)}% dialogue
+                        </p>
+                      )}
+                      {(!voiceCheck.phrase_matches || voiceCheck.phrase_matches.length === 0) && (!voiceCheck.scripture_matches || voiceCheck.scripture_matches.length === 0) && <p>Check the chapter after adding more of your own language{pack.usesScripture ? ' or scripture anchors' : ''} to see evidence here.</p>}
+                    </div>
+                  </div>
+                )}
+
+                <ConsistencyCheck projectId={projectId!} chapterId={chapterId!} disabled={!!actionLoading} beforeCheck={saveBefore} />
+
+                {pack.verifiesQuotes && (
+                  <QuoteCheck projectId={projectId!} chapterId={chapterId!} disabled={!!actionLoading} beforeCheck={saveBefore} />
+                )}
+
+                {/* Scripture suggestions — only for packs with a verified scripture index */}
+                {pack.usesScripture && (<>
+                  <p className="folio pt-2">Find</p>
+
+                  <button
+                    onClick={handleScriptureSuggest}
+                    disabled={!!actionLoading}
+                    className="w-full card p-3 text-left hover:border-seal/50 flex items-start gap-3 disabled:opacity-50"
+                  >
+                    <BookOpen size={18} className="text-seal flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h3 className="font-medium text-sm">Suggest Scripture Anchor</h3>
+                      <p className="text-xs text-study-400">Get verified scriptures fitting this passage.</p>
+                    </div>
+                    {actionLoading === 'scripture' && <Loader2 size={14} className="animate-spin text-seal ml-auto" />}
+                  </button>
+
+                  {scriptureSuggestions.length > 0 && (
+                    <div className="space-y-2">
+                      {scriptureSuggestions.map((s, i) => (
+                        <div key={i} className="scripture-block py-2 px-3">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-mono text-xs not-italic text-seal-400">{s.ref}</span>
+                            <button onClick={() => insertScripture(s)} className="text-xs text-seal hover:underline not-italic">
+                              Insert
+                            </button>
+                          </div>
+                          <p className="text-sm">{s.text}</p>
+                          {s.reason && <p className="text-xs text-study-400 not-italic mt-1">{s.reason}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>)}
+              </div>
+            )}
+
+            {/* Chat lives here as an always-available ask box */}
+            <div className="p-4 border-t border-paper-300">
+              <label htmlFor="scribe-ask" className="block text-xs text-study-400 mb-1.5">Ask about this chapter</label>
+              <div className="flex gap-2">
+                <input
+                  id="scribe-ask"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !chatStreaming && handleChatSend()}
+                  className="input-field flex-1 min-w-0 text-sm"
+                  placeholder="What's missing from this chapter?"
+                  disabled={chatStreaming}
+                />
+                <button onClick={handleChatSend} disabled={chatStreaming || !chatInput.trim()} className="btn-primary px-3 disabled:opacity-50" aria-label="Send">
+                  <Send size={16} />
+                </button>
+              </div>
             </div>
           </>
         )}
-      </div>
+      </aside>
     </div>
   )
 }

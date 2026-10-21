@@ -77,7 +77,7 @@ export default function ChapterNotesPanel({ projectId, chapterId }: Props) {
       {entries === null ? (
         <p className="text-sm text-study-300">Loading…</p>
       ) : entries.length === 0 ? (
-        <p className="text-sm text-ink0 italic">No notes on this chapter yet.</p>
+        <p className="text-sm text-study-400 italic">No notes on this chapter yet.</p>
       ) : (
         entries.map((e) => (
           <div key={e.id} className="card p-3 text-sm">

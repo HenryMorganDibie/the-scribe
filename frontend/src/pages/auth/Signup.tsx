@@ -5,6 +5,7 @@ import QuillLogo from '@/components/ui/QuillLogo'
 import { useAuthStore } from '@/stores/authStore'
 import { detailMessage } from '@/lib/api'
 import GoogleSignInButton from '@/components/auth/GoogleSignInButton'
+import PasswordInput from '@/components/auth/PasswordInput'
 
 export default function Signup() {
   const [fullName, setFullName] = useState('')
@@ -72,9 +73,10 @@ export default function Signup() {
               />
             </div>
             <div>
-              <label className="block text-sm text-study-400 mb-1.5">Password</label>
-              <input
-                type="password"
+              <label htmlFor="password" className="block text-sm text-study-400 mb-1.5">Password</label>
+              <PasswordInput
+                id="password"
+                autoComplete="new-password"
                 required
                 minLength={15}
                 maxLength={64}
